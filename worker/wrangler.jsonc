@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "botyr-ai-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-27",
+  "account_id": "6c8453d5557efcd7aa79b2598065d4cc",
+  "observability": {
+    "enabled": true
+  }
+}
