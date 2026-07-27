@@ -12,17 +12,14 @@ function cors(origin) {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
-    "Vary": "Origin",
+    Vary: "Origin",
   };
 }
 
 function json(data, status, origin) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      ...cors(origin),
-    },
+    headers: { "Content-Type": "application/json; charset=utf-8", ...cors(origin) },
   });
 }
 
@@ -43,11 +40,9 @@ export default {
     if (url.pathname !== "/generate" || request.method !== "POST") {
       return json({ error: "Not found" }, 404, origin);
     }
-
     if (!ALLOWED_ORIGINS.has(origin)) {
       return json({ error: "Origin not allowed" }, 403, origin);
     }
-
     if (!env.DEEPSEEK_API_KEY) {
       return json({ error: "服务尚未配置完成" }, 503, origin);
     }
@@ -62,49 +57,51 @@ export default {
     const industry = clean(body.industry, 50);
     const offer = clean(body.offer, 120);
     const city = clean(body.city, 40);
-
     if (!industry || !offer || !city) {
       return json({ error: "请完整填写行业、产品和城市" }, 400, origin);
     }
 
-    const systemPrompt = `你是中国本地商家的短视频内容策划师。请根据用户提供的行业、产品和城市，输出可直接拍摄的内容方案。
+    const systemPrompt = `你是中国本地商家的短视频内容策划师。根据用户提供的行业、产品和城市，输出可直接拍摄的内容方案。
 要求：
 1. 生成 7 条不重复的同城短视频选题；
 2. 每条包含 title、hook、script、shots、cta；
-3. script 为 80-150 字自然口播，不夸大、不虚构数据、不承诺收益；
-4. shots 为 3 个简短镜头建议组成的数组；
+3. script 是 80-150 字的自然口播，不夸大、不虚构数据、不承诺收益；
+4. shots 是由 3 个简短镜头建议组成的数组；
 5. cta 引导收藏、评论或私信，但不得制造焦虑；
 6. 只输出 JSON，格式为 {"ideas":[...]}，不要输出 Markdown。`;
 
-    const upstream = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "deepseek-v4-flash",
-        thinking: { type: "disabled" },
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: JSON.stringify({ industry, offer, city }),
-          },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.8,
-        max_tokens: 1800,
-      }),
-    });
+    let upstream;
+    try {
+      upstream = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek-v4-flash",
+          thinking: { type: "disabled" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: JSON.stringify({ industry, offer, city }) },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.8,
+          max_tokens: 1800,
+        }),
+      });
+    } catch {
+      return json({ error: "暂时无法连接 AI 服务，请稍后重试" }, 502, origin);
+    }
 
     if (!upstream.ok) {
+      const detail = await upstream.text();
+      console.error("DeepSeek error", upstream.status, detail.slice(0, 500));
       return json({ error: "AI 服务暂时不可用，请稍后重试" }, 502, origin);
     }
 
     const result = await upstream.json();
     const content = result?.choices?.[0]?.message?.content;
-
     try {
       const parsed = JSON.parse(content);
       if (!Array.isArray(parsed.ideas) || parsed.ideas.length === 0) throw new Error();
