@@ -77,3 +77,13 @@ BotyrAnalytics.registerAdapter(event => {
 ```
 
 正式运营时建议将事件写入服务端数据库；浏览器 `localStorage` 仅用于第一阶段验证和调试。
+
+## 成片制作台事件
+
+| 事件名 | 触发时机 |
+| --- | --- |
+| `video_studio_open` | 用户打开照片成片工作台 |
+| `video_media_added` | 用户添加图片或音频素材 |
+| `local_video_render_start` | 开始浏览器本地合成 |
+| `local_video_render_success` | 本地视频合成成功 |
+| `local_video_download` | 用户下载合成视频 |
