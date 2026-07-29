@@ -26,10 +26,21 @@
           <div class="studio-thumbs" id="studio-thumbs"><span class="studio-empty">还没有选择照片</span></div>
         </div>
         <div class="studio-block">
-          <h3>2. 可选声音</h3>
-          <p>可以上传自己录制的口播或一段有使用授权的音乐；不上传也能生成无声字幕版。</p>
+          <h3>2. 自动讲解与声音</h3>
+          <p>让 AI 使用当前完整口播生成普通话讲解，也可以改用自己的录音。</p>
+          <div class="studio-voice-row">
+            <select id="studio-voice" aria-label="选择AI音色">
+              <option value="101001">自然女声</option>
+              <option value="101004">沉稳男声</option>
+              <option value="101030">通用男声</option>
+            </select>
+            <button id="studio-generate-voice" type="button">生成 AI 讲解</button>
+          </div>
+          <p class="studio-voice-status" id="studio-voice-status">尚未生成 AI 讲解</p>
+          <audio id="studio-voice-preview" controls hidden></audio>
           <label class="studio-file">添加音频 <span>MP3 / M4A / WAV</span><input id="studio-audio" type="file" accept="audio/*" /></label>
           <p class="studio-audio-name" id="studio-audio-name">暂未添加音频</p>
+          <label class="studio-music-toggle"><input id="studio-auto-music" type="checkbox" checked /><span><b>自动添加轻音乐</b><small>系统生成低音量氛围音乐，并自动避让讲解</small></span></label>
         </div>
         <div class="studio-block">
           <h3>3. 视频样式</h3>
@@ -61,6 +72,11 @@
   const audioInput = section.querySelector('#studio-audio');
   const thumbs = section.querySelector('#studio-thumbs');
   const audioName = section.querySelector('#studio-audio-name');
+  const voiceSelect = section.querySelector('#studio-voice');
+  const voiceButton = section.querySelector('#studio-generate-voice');
+  const voiceStatus = section.querySelector('#studio-voice-status');
+  const voicePreview = section.querySelector('#studio-voice-preview');
+  const autoMusic = section.querySelector('#studio-auto-music');
   const renderButton = section.querySelector('#studio-render');
   const canvas = section.querySelector('#studio-canvas');
   const video = section.querySelector('#studio-video');
@@ -72,6 +88,8 @@
   let imageFiles = [];
   let previewBitmaps = [];
   let outputUrl = '';
+  let generatedVoiceBlob = null;
+  let generatedVoiceUrl = '';
 
   const activeIdea = () => document.querySelector('.direction-panel.active .idea-item') || document.querySelector('.idea-item');
   const resultCopy = () => {
@@ -153,6 +171,50 @@
     canvas.hidden = false;
     download.classList.remove('ready');
   };
+  const base64ToBlob = (base64, type) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new Blob([bytes], { type });
+  };
+  const waitForMedia = media => withTimeout(new Promise((resolve, reject) => {
+    if (Number.isFinite(media.duration) && media.duration > 0) return resolve();
+    media.addEventListener('loadedmetadata', resolve, { once: true });
+    media.addEventListener('error', () => reject(new Error('音频读取失败')), { once: true });
+    media.load();
+  }), 10000, '音频读取超时，请更换音频');
+  const createMusicBed = (context, destination, duration, hasNarration) => {
+    const master = context.createGain();
+    master.gain.setValueAtTime(hasNarration ? 0.022 : 0.045, context.currentTime);
+    master.connect(destination);
+    const oscillators = [0, 1, 2].map(index => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      gain.gain.value = index === 0 ? .55 : .3;
+      oscillator.connect(gain).connect(master);
+      return oscillator;
+    });
+    const chords = [
+      [220, 277.18, 329.63],
+      [196, 246.94, 293.66],
+      [174.61, 220, 261.63],
+      [196, 246.94, 329.63],
+    ];
+    const startAt = context.currentTime + .05;
+    for (let time = 0, chord = 0; time < duration; time += 3.2, chord += 1) {
+      chords[chord % chords.length].forEach((frequency, index) => {
+        oscillators[index].frequency.setTargetAtTime(frequency, startAt + time, .35);
+      });
+    }
+    master.gain.setValueAtTime(hasNarration ? .022 : .045, startAt);
+    master.gain.setTargetAtTime(0.0001, startAt + Math.max(0, duration - 1.2), .35);
+    oscillators.forEach(oscillator => {
+      oscillator.start(startAt);
+      oscillator.stop(startAt + duration + .2);
+    });
+    return oscillators;
+  };
   const withTimeout = (promise, milliseconds, message) => Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(message)), milliseconds)),
@@ -233,9 +295,49 @@
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'image', count: imageFiles.length });
   });
   audioInput.addEventListener('change', () => {
+    generatedVoiceBlob = null;
+    if (generatedVoiceUrl) URL.revokeObjectURL(generatedVoiceUrl);
+    generatedVoiceUrl = '';
+    voicePreview.hidden = true;
+    voicePreview.removeAttribute('src');
+    voiceStatus.textContent = audioInput.files[0] ? '已改用你上传的音频' : '尚未生成 AI 讲解';
     audioName.textContent = audioInput.files[0]?.name || '暂未添加音频';
     resetOutput();
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'audio', count: audioInput.files.length });
+  });
+  voiceButton.addEventListener('click', async () => {
+    const text = resultCopy().script.slice(0, 150);
+    if (!text) {
+      voiceStatus.textContent = '当前方案没有可用口播';
+      return;
+    }
+    voiceButton.disabled = true;
+    voiceButton.textContent = '正在生成…';
+    voiceStatus.textContent = 'AI 正在生成普通话讲解…';
+    try {
+      const response = await fetch('https://botyr-ai-api.3246809585.workers.dev/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceType: Number(voiceSelect.value) }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.audio) throw new Error(payload.error || 'AI 讲解生成失败');
+      generatedVoiceBlob = base64ToBlob(payload.audio, 'audio/mpeg');
+      if (generatedVoiceUrl) URL.revokeObjectURL(generatedVoiceUrl);
+      generatedVoiceUrl = URL.createObjectURL(generatedVoiceBlob);
+      voicePreview.src = generatedVoiceUrl;
+      voicePreview.hidden = false;
+      voiceStatus.textContent = 'AI 讲解已生成，可以试听';
+      audioInput.value = '';
+      audioName.textContent = '当前使用 AI 自动讲解';
+      resetOutput();
+      globalThis.BotyrAnalytics?.track('ai_narration_success', { voice_type: Number(voiceSelect.value), text_length: text.length });
+    } catch (error) {
+      voiceStatus.textContent = error.message || 'AI 讲解生成失败';
+    } finally {
+      voiceButton.disabled = false;
+      voiceButton.textContent = '重新生成 AI 讲解';
+    }
   });
   section.addEventListener('change', event => {
     if (event.target.matches('[name="studio-style"]')) refreshPreview();
@@ -257,7 +359,9 @@
     renderButton.textContent = '正在本地合成…';
     progress.style.width = '4%';
     progressText.textContent = '正在准备照片…';
-    globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: Boolean(audioInput.files[0]) });
+    const narrationBlob = generatedVoiceBlob || audioInput.files[0] || null;
+    const useMusic = Boolean(autoMusic?.checked);
+    globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: Boolean(narrationBlob), auto_music: useMusic });
     let recorder = null;
     let tracks = [];
     let audioElement = null;
@@ -269,8 +373,8 @@
       if (!bitmaps.length) throw new Error('没有可用照片，请重新选择素材');
       const copy = resultCopy();
       const sentences = splitCopy(copy.script);
-      const sceneSeconds = 2.8;
-      const duration = Math.max(8.4, Math.min(16.8, bitmaps.length * sceneSeconds));
+      const baseDuration = Math.max(8.4, Math.min(16.8, bitmaps.length * 2.8));
+      let duration = baseDuration;
       const fps = 30;
       const renderCanvas = document.createElement('canvas');
       renderCanvas.width = 720;
@@ -278,16 +382,22 @@
       const renderContext = renderCanvas.getContext('2d');
       const videoStream = renderCanvas.captureStream(fps);
       tracks = [...videoStream.getVideoTracks()];
-      if (audioInput.files[0]) {
-        audioUrl = URL.createObjectURL(audioInput.files[0]);
-        audioElement = new Audio(audioUrl);
-        audioElement.crossOrigin = 'anonymous';
+      let destination = null;
+      if (narrationBlob || useMusic) {
         audioContext = new AudioContext();
-        const source = audioContext.createMediaElementSource(audioElement);
-        const destination = audioContext.createMediaStreamDestination();
-        source.connect(destination);
+        destination = audioContext.createMediaStreamDestination();
         tracks.push(...destination.stream.getAudioTracks());
       }
+      if (narrationBlob) {
+        audioUrl = URL.createObjectURL(narrationBlob);
+        audioElement = new Audio(audioUrl);
+        await waitForMedia(audioElement);
+        duration = Math.max(baseDuration, Math.min(45, audioElement.duration + .5));
+        const source = audioContext.createMediaElementSource(audioElement);
+        source.connect(destination);
+      }
+      if (useMusic) createMusicBed(audioContext, destination, duration, Boolean(narrationBlob));
+      const sceneSeconds = duration / bitmaps.length;
       const stream = new MediaStream(tracks);
       const mimeTypes = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
       const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
@@ -299,13 +409,25 @@
         recorder.onerror = () => reject(recorder.error || new Error('视频合成失败'));
       });
       recorder.start(500);
+      if (audioContext) {
+        progressText.textContent = '正在启动自动声音…';
+        await withTimeout(
+          audioContext.resume(),
+          4000,
+          '浏览器阻止了自动声音，请点击页面后重试',
+        );
+      }
       if (audioElement) {
-        await audioContext.resume();
-        await audioElement.play();
+        await withTimeout(
+          audioElement.play(),
+          5000,
+          '浏览器阻止了讲解播放，请点击页面后重试',
+        );
       }
       const startedAt = performance.now();
       await withTimeout(new Promise(resolve => {
-        const tick = now => {
+        const tick = () => {
+          const now = performance.now();
           const elapsed = (now - startedAt) / 1000;
           const ratio = Math.min(1, elapsed / duration);
           const scene = Math.min(bitmaps.length - 1, Math.floor(elapsed / sceneSeconds));
@@ -314,10 +436,10 @@
           drawFrame(renderContext, bitmaps[scene], copy, sentence, sceneProgress, section.querySelector('[name="studio-style"]:checked')?.value);
           progress.style.width = `${Math.round(ratio * 100)}%`;
           progressText.textContent = ratio < .33 ? '正在编排画面…' : ratio < .72 ? '正在生成字幕和转场…' : ratio < 1 ? '正在封装视频…' : '合成完成';
-          if (ratio < 1) requestAnimationFrame(tick);
+          if (ratio < 1) setTimeout(tick, 1000 / fps);
           else resolve();
         };
-        requestAnimationFrame(tick);
+        tick();
       }), duration * 1000 + 8000, '视频渲染超时，请保持页面显示并减少照片数量');
       recorder.stop();
       audioElement?.pause();
@@ -335,7 +457,7 @@
       download.textContent = `下载视频（${(blob.size / 1024 / 1024).toFixed(1)} MB）`;
       progress.style.width = '100%';
       progressText.textContent = '已生成，可先播放预览再下载';
-      globalThis.BotyrAnalytics?.track('local_video_render_success', { image_count: imageFiles.length, has_audio: Boolean(audioInput.files[0]), duration_seconds: duration });
+      globalThis.BotyrAnalytics?.track('local_video_render_success', { image_count: imageFiles.length, has_audio: Boolean(narrationBlob), auto_music: useMusic, duration_seconds: duration });
     } catch (error) {
       console.error(error);
       progressText.textContent = `合成失败：${error.message || '请重新尝试'}`;

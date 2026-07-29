@@ -27,6 +27,90 @@ function clean(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
+const encoder = new TextEncoder();
+
+function toHex(buffer) {
+  return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256(value) {
+  return crypto.subtle.digest("SHA-256", typeof value === "string" ? encoder.encode(value) : value);
+}
+
+async function hmac(key, value) {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    typeof key === "string" ? encoder.encode(key) : key,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(value));
+}
+
+async function synthesizeSpeech(text, voiceType, env) {
+  const host = "tts.tencentcloudapi.com";
+  const service = "tts";
+  const action = "TextToVoice";
+  const version = "2019-08-23";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+  const payload = JSON.stringify({
+    Text: text,
+    SessionId: crypto.randomUUID(),
+    ModelType: 1,
+    VoiceType: voiceType,
+    Codec: "mp3",
+    SampleRate: 16000,
+    Speed: 0.5,
+    Volume: 1,
+    PrimaryLanguage: 1,
+  });
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`;
+  const signedHeaders = "content-type;host";
+  const canonicalRequest = [
+    "POST",
+    "/",
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    toHex(await sha256(payload)),
+  ].join("\n");
+  const credentialScope = `${date}/${service}/tc3_request`;
+  const stringToSign = [
+    "TC3-HMAC-SHA256",
+    timestamp,
+    credentialScope,
+    toHex(await sha256(canonicalRequest)),
+  ].join("\n");
+  const secretDate = await hmac(`TC3${env.TENCENT_SECRET_KEY}`, date);
+  const secretService = await hmac(secretDate, service);
+  const secretSigning = await hmac(secretService, "tc3_request");
+  const signature = toHex(await hmac(secretSigning, stringToSign));
+  const authorization = `TC3-HMAC-SHA256 Credential=${env.TENCENT_SECRET_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const response = await fetch(`https://${host}`, {
+    method: "POST",
+    headers: {
+      Authorization: authorization,
+      "Content-Type": "application/json; charset=utf-8",
+      Host: host,
+      "X-TC-Action": action,
+      "X-TC-Version": version,
+      "X-TC-Timestamp": String(timestamp),
+    },
+    body: payload,
+  });
+  const data = await response.json();
+  if (!response.ok || data?.Response?.Error || !data?.Response?.Audio) {
+    console.error("Tencent TTS error", data?.Response?.Error || response.status);
+    throw new Error(data?.Response?.Error?.Message || "语音合成失败");
+  }
+  return {
+    audio: data.Response.Audio,
+    requestId: data.Response.RequestId || null,
+  };
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
@@ -37,14 +121,11 @@ export default {
     }
 
     const url = new URL(request.url);
-    if (url.pathname !== "/generate" || request.method !== "POST") {
+    if (!["/generate", "/tts"].includes(url.pathname) || request.method !== "POST") {
       return json({ error: "Not found" }, 404, origin);
     }
     if (!ALLOWED_ORIGINS.has(origin)) {
       return json({ error: "Origin not allowed" }, 403, origin);
-    }
-    if (!env.DEEPSEEK_API_KEY) {
-      return json({ error: "服务尚未配置完成" }, 503, origin);
     }
 
     let body;
@@ -52,6 +133,27 @@ export default {
       body = await request.json();
     } catch {
       return json({ error: "请求格式错误" }, 400, origin);
+    }
+
+    if (url.pathname === "/tts") {
+      if (!env.TENCENT_SECRET_ID || !env.TENCENT_SECRET_KEY) {
+        return json({ error: "自动讲解服务尚未配置，请先添加腾讯云密钥" }, 503, origin);
+      }
+      const text = clean(body.text, 150);
+      const allowedVoices = new Set([101001, 101004, 101030]);
+      const voiceType = allowedVoices.has(Number(body.voiceType)) ? Number(body.voiceType) : 101001;
+      if (text.length < 2) return json({ error: "口播内容太短" }, 400, origin);
+      try {
+        const speech = await synthesizeSpeech(text, voiceType, env);
+        return json({ audio: speech.audio, codec: "mp3", request_id: speech.requestId }, 200, origin);
+      } catch (error) {
+        console.error("TTS request failed", error);
+        return json({ error: "自动讲解暂时不可用，请稍后重试" }, 502, origin);
+      }
+    }
+
+    if (!env.DEEPSEEK_API_KEY) {
+      return json({ error: "服务尚未配置完成" }, 503, origin);
     }
 
     const industry = clean(body.industry, 50);

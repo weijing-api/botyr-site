@@ -87,3 +87,4 @@ BotyrAnalytics.registerAdapter(event => {
 | `local_video_render_start` | 开始浏览器本地合成 |
 | `local_video_render_success` | 本地视频合成成功 |
 | `local_video_download` | 用户下载合成视频 |
+| `ai_narration_success` | 腾讯云 AI 讲解生成成功 |
