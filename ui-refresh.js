@@ -1,7 +1,7 @@
 (() => {
   const lateStyles = document.createElement('link');
   lateStyles.rel = 'stylesheet';
-  lateStyles.href = 'ui-refresh.css?v=2';
+  lateStyles.href = 'ui-refresh.css?v=3';
   document.head.appendChild(lateStyles);
 
   const quickStart = document.querySelector('.quick-start');
@@ -75,6 +75,15 @@
   if (ideas) new MutationObserver(updateAnalysis).observe(ideas, { childList: true, subtree: true });
 
   ideas?.addEventListener('click', async event => {
+    const directionTab = event.target.closest('.direction-tab');
+    if (directionTab) {
+      const direction = directionTab.dataset.direction;
+      ideas.querySelectorAll('.direction-tab').forEach(tab => tab.classList.toggle('active', tab === directionTab));
+      ideas.querySelectorAll('.direction-panel').forEach(panel => panel.classList.toggle('active', panel.dataset.direction === direction));
+      const title = directionTab.querySelector('span')?.textContent;
+      if (title) document.querySelector('#result-title').textContent = title;
+      return;
+    }
     const item = event.target.closest('.idea-item');
     if (!item) return;
     if (event.target.closest('.idea-summary')) {
