@@ -1,17 +1,19 @@
 (() => {
   const lateStyles = document.createElement('link');
   lateStyles.rel = 'stylesheet';
-  lateStyles.href = 'ui-refresh.css?v=1';
+  lateStyles.href = 'ui-refresh.css?v=2';
   document.head.appendChild(lateStyles);
 
   const quickStart = document.querySelector('.quick-start');
+  const caseStudies = document.querySelector('.case-studies');
   const generator = document.querySelector('#generator');
   const result = document.querySelector('#result');
   const form = document.querySelector('#idea-form');
   const industry = document.querySelector('#industry');
   const ideas = document.querySelector('#ideas');
 
-  if (quickStart && generator) quickStart.after(generator);
+  if (caseStudies && generator) caseStudies.after(generator);
+  else if (quickStart && generator) quickStart.after(generator);
   if (generator && result) generator.after(result);
 
   if (industry && !industry.value) {
@@ -43,6 +45,34 @@
   });
   document.querySelector('#regenerate')?.addEventListener('click', () => form?.requestSubmit());
   document.querySelector('#result-wechat')?.addEventListener('click', () => document.querySelector('.wechat-modal')?.classList.add('open'));
+  document.querySelector('#upgrade-entry')?.addEventListener('click', () => document.querySelector('.wechat-modal')?.classList.add('open'));
+  document.querySelector('#case-contact')?.addEventListener('click', () => document.querySelector('.wechat-modal')?.classList.add('open'));
+
+  const quotaKey = `botyr-free-usage-${new Date().toISOString().slice(0, 10)}`;
+  const remainingNode = document.querySelector('#remaining-count');
+  const readUsage = () => Math.min(3, Number(localStorage.getItem(quotaKey) || 0));
+  const updateRemaining = () => {
+    if (remainingNode) remainingNode.textContent = String(Math.max(0, 3 - readUsage()));
+  };
+  updateRemaining();
+  let lastResultSignature = '';
+  const updateAnalysis = () => {
+    const cards = ideas?.querySelectorAll('.idea-item') || [];
+    if (!cards.length) return;
+    const signature = cards[0].querySelector('h3')?.textContent || '';
+    if (!signature || signature === lastResultSignature) return;
+    lastResultSignature = signature;
+    localStorage.setItem(quotaKey, String(Math.min(3, readUsage() + 1)));
+    updateRemaining();
+    const factsLength = document.querySelector('#facts')?.value.trim().length || 0;
+    const match = factsLength >= 32 ? '高' : factsLength >= 16 ? '良好' : '基础';
+    const viral = factsLength >= 40 ? 'A' : factsLength >= 24 ? 'A−' : 'B+';
+    const matchNode = document.querySelector('#match-level');
+    const viralNode = document.querySelector('#viral-index');
+    if (matchNode) matchNode.textContent = match;
+    if (viralNode) viralNode.textContent = viral;
+  };
+  if (ideas) new MutationObserver(updateAnalysis).observe(ideas, { childList: true, subtree: true });
 
   ideas?.addEventListener('click', async event => {
     const item = event.target.closest('.idea-item');
