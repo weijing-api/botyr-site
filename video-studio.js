@@ -153,7 +153,18 @@
     canvas.hidden = false;
     download.classList.remove('ready');
   };
-  const loadBitmaps = async files => Promise.all(files.map(file => createImageBitmap(file)));
+  const withTimeout = (promise, milliseconds, message) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), milliseconds)),
+  ]);
+  const loadBitmaps = async files => withTimeout(
+    Promise.all(files.map(file => createImageBitmap(file, {
+      resizeWidth: 1280,
+      resizeQuality: 'high',
+    }))),
+    15000,
+    '照片读取超时，请减少照片数量或换用 JPG、PNG 格式',
+  );
   const refreshPreview = async () => {
     previewBitmaps.forEach(bitmap => bitmap.close?.());
     previewBitmaps = await loadBitmaps(imageFiles);
@@ -192,7 +203,11 @@
     section.hidden = false;
     document.body.classList.add('has-video-studio');
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    refreshPreview();
+    if (imageFiles.length && !previewBitmaps.length) {
+      refreshPreview().catch(error => {
+        progressText.textContent = error.message;
+      });
+    }
     globalThis.BotyrAnalytics?.track('video_studio_open');
   });
   closeButton.addEventListener('click', () => {
@@ -204,8 +219,17 @@
     imageFiles = [...imageInput.files].filter(file => file.type.startsWith('image/')).slice(0, 6);
     resetOutput();
     renderThumbs();
-    await refreshPreview();
-    progressText.textContent = imageFiles.length ? `已添加 ${imageFiles.length} 张照片，可以生成` : '等待添加素材';
+    progress.style.width = imageFiles.length ? '3%' : '0';
+    progressText.textContent = imageFiles.length ? '正在读取照片…' : '等待添加素材';
+    try {
+      await refreshPreview();
+      progress.style.width = '0';
+      progressText.textContent = imageFiles.length ? `已添加 ${imageFiles.length} 张照片，可以生成` : '等待添加素材';
+    } catch (error) {
+      previewBitmaps = [];
+      progress.style.width = '0';
+      progressText.textContent = `照片读取失败：${error.message || '请换用 JPG、PNG 或 WebP 图片'}`;
+    }
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'image', count: imageFiles.length });
   });
   audioInput.addEventListener('change', () => {
@@ -231,9 +255,18 @@
     resetOutput();
     renderButton.disabled = true;
     renderButton.textContent = '正在本地合成…';
+    progress.style.width = '4%';
+    progressText.textContent = '正在准备照片…';
     globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: Boolean(audioInput.files[0]) });
+    let recorder = null;
+    let tracks = [];
+    let audioElement = null;
+    let audioContext = null;
+    let audioUrl = '';
     try {
-      const bitmaps = await loadBitmaps(imageFiles);
+      if (previewBitmaps.length !== imageFiles.length) previewBitmaps = await loadBitmaps(imageFiles);
+      const bitmaps = previewBitmaps;
+      if (!bitmaps.length) throw new Error('没有可用照片，请重新选择素材');
       const copy = resultCopy();
       const sentences = splitCopy(copy.script);
       const sceneSeconds = 2.8;
@@ -244,10 +277,7 @@
       renderCanvas.height = 1280;
       const renderContext = renderCanvas.getContext('2d');
       const videoStream = renderCanvas.captureStream(fps);
-      const tracks = [...videoStream.getVideoTracks()];
-      let audioElement = null;
-      let audioContext = null;
-      let audioUrl = '';
+      tracks = [...videoStream.getVideoTracks()];
       if (audioInput.files[0]) {
         audioUrl = URL.createObjectURL(audioInput.files[0]);
         audioElement = new Audio(audioUrl);
@@ -261,7 +291,7 @@
       const stream = new MediaStream(tracks);
       const mimeTypes = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
       const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 5_000_000 } : undefined);
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 5_000_000 } : undefined);
       const chunks = [];
       recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
       const finished = new Promise((resolve, reject) => {
@@ -274,7 +304,7 @@
         await audioElement.play();
       }
       const startedAt = performance.now();
-      await new Promise(resolve => {
+      await withTimeout(new Promise(resolve => {
         const tick = now => {
           const elapsed = (now - startedAt) / 1000;
           const ratio = Math.min(1, elapsed / duration);
@@ -288,12 +318,11 @@
           else resolve();
         };
         requestAnimationFrame(tick);
-      });
+      }), duration * 1000 + 8000, '视频渲染超时，请保持页面显示并减少照片数量');
       recorder.stop();
       audioElement?.pause();
       await finished;
       tracks.forEach(track => track.stop());
-      bitmaps.forEach(bitmap => bitmap.close?.());
       await audioContext?.close();
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
@@ -312,6 +341,11 @@
       progressText.textContent = `合成失败：${error.message || '请重新尝试'}`;
       progress.style.width = '0';
     } finally {
+      audioElement?.pause();
+      if (recorder?.state === 'recording') recorder.stop();
+      tracks.forEach(track => track.stop());
+      if (audioContext && audioContext.state !== 'closed') audioContext.close().catch(() => {});
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
       renderButton.disabled = false;
       renderButton.textContent = '重新生成视频';
     }
