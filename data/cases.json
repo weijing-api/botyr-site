@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-29T00:00:00+08:00",
+  "cases": [
+    {
+      "id": "food-product-test-001",
+      "industry": "餐饮美食",
+      "icon": "🍗",
+      "title": "6 元鸡腿的同城短视频获客方案",
+      "summary": "使用真实价格、产品特点和供应信息，生成标题、口播、分镜与评论区引导。",
+      "status": "product_verified",
+      "status_label": "产品实测",
+      "metrics": {
+        "plays": null,
+        "leads": null,
+        "plans_generated": 7
+      },
+      "source": {
+        "authorized": true,
+        "verified_at": "2026-07-28"
+      }
+    },
+    {
+      "id": "beauty-awaiting-001",
+      "industry": "美业美容",
+      "icon": "💄",
+      "title": "美容店如何利用短视频引流",
+      "summary": "案例展示位已建立，等待真实商家授权后补充播放量和咨询数据。",
+      "status": "awaiting_authorization",
+      "status_label": "待授权",
+      "metrics": {
+        "plays": null,
+        "leads": null,
+        "plans_generated": null
+      },
+      "source": {
+        "authorized": false,
+        "verified_at": null
+      }
+    },
+    {
+      "id": "renovation-awaiting-001",
+      "industry": "装修家居",
+      "icon": "🏠",
+      "title": "旧房改造案例如何建立专业信任",
+      "summary": "预留真实案例结构，取得授权并核验数据后即可直接发布。",
+      "status": "awaiting_authorization",
+      "status_label": "待授权",
+      "metrics": {
+        "plays": null,
+        "leads": null,
+        "plans_generated": null
+      },
+      "source": {
+        "authorized": false,
+        "verified_at": null
+      }
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 (() => {
   const lateStyles = document.createElement('link');
   lateStyles.rel = 'stylesheet';
-  lateStyles.href = 'ui-refresh.css?v=3';
+  lateStyles.href = 'ui-refresh.css?v=4';
   document.head.appendChild(lateStyles);
 
   const quickStart = document.querySelector('.quick-start');
@@ -10,6 +10,8 @@
   const result = document.querySelector('#result');
   const form = document.querySelector('#idea-form');
   const industry = document.querySelector('#industry');
+  const offer = document.querySelector('#offer');
+  const facts = document.querySelector('#facts');
   const ideas = document.querySelector('#ideas');
 
   if (caseStudies && generator) caseStudies.after(generator);
@@ -29,8 +31,20 @@
         industry.value = chip.dataset.industry;
         industry.dispatchEvent(new Event('change'));
       }
+      if (offer) {
+        offer.value = chip.dataset.product || '';
+        offer.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      if (facts) {
+        facts.value = `推广目标：${chip.dataset.goal || '吸引本地客户咨询'}\n内容方向：爆款短视频获客\n真实卖点：请补充你的真实价格、工艺、服务或产品特色`;
+        facts.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      globalThis.BotyrAnalytics?.track('industry_template_selected', {
+        template_id: chip.dataset.templateId || 'unknown',
+        industry: chip.dataset.industry || 'unknown',
+      });
       generator?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setTimeout(() => document.querySelector('#offer')?.focus({ preventScroll: true }), 450);
+      setTimeout(() => facts?.focus({ preventScroll: true }), 450);
     });
   });
 
