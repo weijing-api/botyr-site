@@ -27,7 +27,7 @@
         </div>
         <div class="studio-block">
           <h3>2. 自动讲解与声音</h3>
-          <p>让 AI 使用当前完整口播生成普通话讲解，也可以改用自己的录音。</p>
+          <p>生成视频时会自动使用当前完整口播制作 AI 讲解；也可以先试听，或改用自己的录音。</p>
           <div class="studio-voice-row">
             <select id="studio-voice" aria-label="选择AI音色">
               <option value="101001">自然女声</option>
@@ -36,7 +36,7 @@
             </select>
             <button id="studio-generate-voice" type="button">生成 AI 讲解</button>
           </div>
-          <p class="studio-voice-status" id="studio-voice-status">尚未生成 AI 讲解</p>
+          <p class="studio-voice-status" id="studio-voice-status">生成视频时将自动制作 AI 讲解</p>
           <audio id="studio-voice-preview" controls hidden></audio>
           <label class="studio-file">添加音频 <span>MP3 / M4A / WAV</span><input id="studio-audio" type="file" accept="audio/*" /></label>
           <p class="studio-audio-name" id="studio-audio-name">暂未添加音频</p>
@@ -49,8 +49,8 @@
             <label><input type="radio" name="studio-style" value="pink" /> 品牌粉色字幕</label>
           </div>
         </div>
-        <div class="studio-note">第一版导出 WebM 竖屏视频。请只使用自己拍摄或已获授权的图片和音频；云端 MP4、AI 配音和视频片段剪辑将在下一阶段接入。</div>
-        <button class="studio-render" id="studio-render" type="button">生成可下载视频</button>
+        <div class="studio-note">当前导出 WebM 竖屏视频，并自动加入 AI 讲解、字幕和轻音乐。请只使用自己拍摄或已获授权的图片和音频。</div>
+        <button class="studio-render" id="studio-render" type="button">自动讲解并生成视频</button>
         <div><div class="studio-progress"><i id="studio-progress"></i></div><p class="studio-progress-text" id="studio-progress-text">等待添加素材</p></div>
       </div>
       <aside class="studio-preview">
@@ -305,33 +305,34 @@
     resetOutput();
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'audio', count: audioInput.files.length });
   });
-  voiceButton.addEventListener('click', async () => {
+  const generateNarration = async ({ resetVideo = true } = {}) => {
     const text = resultCopy().script.slice(0, 150);
-    if (!text) {
-      voiceStatus.textContent = '当前方案没有可用口播';
-      return;
-    }
+    if (!text) throw new Error('当前方案没有可用口播');
+    voiceStatus.textContent = 'AI 正在生成普通话讲解…';
+    const response = await withTimeout(fetch('https://botyr-ai-api.3246809585.workers.dev/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voiceType: Number(voiceSelect.value) }),
+    }), 30000, 'AI 讲解生成超时，请重新尝试');
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.audio) throw new Error(payload.error || 'AI 讲解生成失败');
+    generatedVoiceBlob = base64ToBlob(payload.audio, 'audio/mpeg');
+    if (generatedVoiceUrl) URL.revokeObjectURL(generatedVoiceUrl);
+    generatedVoiceUrl = URL.createObjectURL(generatedVoiceBlob);
+    voicePreview.src = generatedVoiceUrl;
+    voicePreview.hidden = false;
+    voiceStatus.textContent = 'AI 讲解已生成，将自动加入视频';
+    audioInput.value = '';
+    audioName.textContent = '当前使用 AI 自动讲解';
+    if (resetVideo) resetOutput();
+    globalThis.BotyrAnalytics?.track('ai_narration_success', { voice_type: Number(voiceSelect.value), text_length: text.length });
+    return generatedVoiceBlob;
+  };
+  voiceButton.addEventListener('click', async () => {
     voiceButton.disabled = true;
     voiceButton.textContent = '正在生成…';
-    voiceStatus.textContent = 'AI 正在生成普通话讲解…';
     try {
-      const response = await fetch('https://botyr-ai-api.3246809585.workers.dev/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceType: Number(voiceSelect.value) }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.audio) throw new Error(payload.error || 'AI 讲解生成失败');
-      generatedVoiceBlob = base64ToBlob(payload.audio, 'audio/mpeg');
-      if (generatedVoiceUrl) URL.revokeObjectURL(generatedVoiceUrl);
-      generatedVoiceUrl = URL.createObjectURL(generatedVoiceBlob);
-      voicePreview.src = generatedVoiceUrl;
-      voicePreview.hidden = false;
-      voiceStatus.textContent = 'AI 讲解已生成，可以试听';
-      audioInput.value = '';
-      audioName.textContent = '当前使用 AI 自动讲解';
-      resetOutput();
-      globalThis.BotyrAnalytics?.track('ai_narration_success', { voice_type: Number(voiceSelect.value), text_length: text.length });
+      await generateNarration();
     } catch (error) {
       voiceStatus.textContent = error.message || 'AI 讲解生成失败';
     } finally {
@@ -359,15 +360,23 @@
     renderButton.textContent = '正在本地合成…';
     progress.style.width = '4%';
     progressText.textContent = '正在准备照片…';
-    const narrationBlob = generatedVoiceBlob || audioInput.files[0] || null;
+    let narrationBlob = generatedVoiceBlob || audioInput.files[0] || null;
     const useMusic = Boolean(autoMusic?.checked);
-    globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: Boolean(narrationBlob), auto_music: useMusic });
     let recorder = null;
     let tracks = [];
     let audioElement = null;
     let audioContext = null;
     let audioUrl = '';
     try {
+      if (!narrationBlob) {
+        renderButton.textContent = '正在生成 AI 讲解…';
+        progress.style.width = '8%';
+        progressText.textContent = '正在根据方案自动生成 AI 讲解…';
+        narrationBlob = await generateNarration({ resetVideo: false });
+      }
+      globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: true, auto_music: useMusic });
+      renderButton.textContent = '正在本地合成…';
+      progressText.textContent = '讲解已生成，正在准备照片…';
       if (previewBitmaps.length !== imageFiles.length) previewBitmaps = await loadBitmaps(imageFiles);
       const bitmaps = previewBitmaps;
       if (!bitmaps.length) throw new Error('没有可用照片，请重新选择素材');
@@ -460,6 +469,7 @@
       globalThis.BotyrAnalytics?.track('local_video_render_success', { image_count: imageFiles.length, has_audio: Boolean(narrationBlob), auto_music: useMusic, duration_seconds: duration });
     } catch (error) {
       console.error(error);
+      if (!narrationBlob) voiceStatus.textContent = error.message || 'AI 讲解生成失败';
       progressText.textContent = `合成失败：${error.message || '请重新尝试'}`;
       progress.style.width = '0';
     } finally {
@@ -469,7 +479,7 @@
       if (audioContext && audioContext.state !== 'closed') audioContext.close().catch(() => {});
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       renderButton.disabled = false;
-      renderButton.textContent = '重新生成视频';
+      renderButton.textContent = outputUrl ? '重新生成视频' : '自动讲解并生成视频';
     }
   });
 
