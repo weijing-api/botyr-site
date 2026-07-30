@@ -1,0 +1,54 @@
+:root{
+  --fungus-lime:#c7ff4a;
+  --fungus-cyan:#5fffe1;
+  --fungus-pink:#ff66bc;
+  --fungus-violet:#8c63ff;
+  --fungus-night:#07110f;
+}
+body.ip-yunnan{background:#07100f;color:#effff7}
+.ip-yunnan main{overflow:clip;background:radial-gradient(circle at 70% 8%,rgba(64,255,197,.08),transparent 30%),#07100f}
+.ip-yunnan .nav{position:absolute;z-index:120;left:50%;top:0;transform:translateX(-50%);color:#fff}
+.ip-yunnan .brand{color:#effff7!important}.ip-yunnan .brand i{background:var(--fungus-lime);box-shadow:0 0 18px rgba(199,255,74,.8)}
+.ip-yunnan .nav-cta{color:#eafff5!important;border:1px solid rgba(255,255,255,.18);padding:10px 14px;border-radius:999px;background:rgba(5,16,14,.3);backdrop-filter:blur(12px)}
+.ip-yunnan .hero{
+  isolation:isolate;position:relative;width:100%!important;max-width:none!important;min-height:min(900px,100svh)!important;margin:0!important;padding:150px max(7vw,28px) 92px!important;border-radius:0!important;overflow:hidden;background:#071310!important;color:#fff!important;display:flex;align-items:center;
+}
+.ip-yunnan .hero:before{content:"";position:absolute;z-index:3;inset:0;background:linear-gradient(90deg,rgba(3,11,10,.92) 0%,rgba(3,11,10,.75) 35%,rgba(3,11,10,.12) 66%,rgba(3,11,10,.35) 100%);pointer-events:none}
+.ip-yunnan .hero:after{content:"";position:absolute;z-index:9;inset:auto 0 0;height:180px;background:linear-gradient(transparent,#07100f);pointer-events:none}
+.yunnan-world-bg{position:absolute;z-index:1;inset:-3%;background:url('yunnan-future-world.webp') center/cover no-repeat;filter:saturate(.88) contrast(1.05);animation:worldBreath 18s ease-in-out infinite alternate;pointer-events:none}
+.yunnan-clouds{position:absolute;z-index:2;inset:10% -20% -20%;opacity:.35;background:radial-gradient(ellipse at 30% 65%,rgba(196,255,235,.34),transparent 27%),radial-gradient(ellipse at 70% 48%,rgba(164,225,255,.2),transparent 24%),radial-gradient(ellipse at 50% 86%,rgba(255,255,255,.24),transparent 34%);filter:blur(28px);animation:cloudDrift 22s linear infinite alternate;pointer-events:none}
+.yunnan-data-field,.yunnan-spores{position:absolute;z-index:5;inset:0;overflow:hidden;pointer-events:none}
+.data-thread{position:absolute;width:1px;height:180px;background:linear-gradient(transparent,var(--fungus-cyan),transparent);opacity:.35;transform:rotate(24deg);animation:dataRise 7s linear infinite}
+.spore{position:absolute;width:5px;height:5px;border-radius:50%;background:var(--fungus-lime);box-shadow:0 0 14px 4px rgba(199,255,74,.35);animation:sporeFloat var(--speed) ease-in-out infinite;opacity:.65}
+.fungus-being{position:absolute;z-index:6;right:max(3vw,12px);bottom:2%;width:min(43vw,650px);height:82%;pointer-events:none;animation:beingFloat 5.8s ease-in-out infinite}
+.fungus-being:before{content:"";position:absolute;inset:20% 8% 5%;border-radius:50%;background:radial-gradient(circle,rgba(95,255,225,.22),rgba(140,99,255,.1) 42%,transparent 70%);filter:blur(22px);animation:auraPulse 4s ease-in-out infinite}
+.fungus-being img{position:relative;width:100%;height:100%;object-fit:contain;object-position:center bottom;filter:drop-shadow(0 25px 48px rgba(0,0,0,.45)) drop-shadow(0 0 22px rgba(95,255,225,.18));animation:beingBreathe 4.4s ease-in-out infinite}
+.fungus-dialogue{position:absolute;z-index:8;right:8vw;top:20%;max-width:240px;padding:14px 18px;border:1px solid rgba(199,255,74,.28);border-radius:18px 18px 4px 18px;background:rgba(6,21,18,.66);color:#eafff5;font-size:14px;font-weight:700;line-height:1.5;box-shadow:0 16px 40px rgba(0,0,0,.2);backdrop-filter:blur(14px);animation:dialogueBob 4s ease-in-out infinite}
+.hero-copy-stack{position:relative;z-index:20;display:flex;width:min(690px,53vw);flex-direction:column;align-items:flex-start;margin-left:0!important}
+.ip-yunnan .eyebrow{display:inline-flex!important;width:auto!important;padding:9px 14px;border:1px solid rgba(95,255,225,.26);border-radius:999px;background:rgba(7,28,23,.42);color:var(--fungus-cyan)!important;font-family:'DM Mono',monospace;letter-spacing:.08em;backdrop-filter:blur(12px)}
+.ip-yunnan .hero h1{margin-top:24px!important;font-size:clamp(58px,6.5vw,112px)!important;line-height:.96!important;letter-spacing:-.075em!important;text-shadow:0 8px 36px rgba(0,0,0,.34)}
+.ip-yunnan .hero h1 em{display:block;margin-top:10px;color:var(--fungus-lime)!important;font-style:normal;text-shadow:0 0 36px rgba(199,255,74,.16)}
+.ip-yunnan .hero-copy{max-width:620px!important;margin-top:26px!important;color:rgba(237,255,247,.76)!important;font-size:clamp(16px,1.5vw,21px)!important;line-height:1.75!important}
+.ip-yunnan .hero-output{color:rgba(213,255,239,.66)!important;font-family:'DM Mono',monospace;font-size:13px!important;letter-spacing:.03em}
+.ip-yunnan .hero-actions{margin-top:30px!important}.ip-yunnan .hero-actions small{color:rgba(223,255,243,.56)!important}
+.ip-yunnan .hero .button.primary{position:relative;overflow:hidden;min-height:62px;padding:0 26px;border:1px solid rgba(255,255,255,.2);border-radius:18px;background:var(--fungus-lime)!important;color:#10200c!important;box-shadow:0 12px 0 #163229,0 24px 50px rgba(0,0,0,.28)!important;font-weight:900}
+.ip-yunnan .hero .button.primary:after{content:"";position:absolute;top:-60%;left:-30%;width:18%;height:220%;background:rgba(255,255,255,.6);transform:rotate(22deg);animation:buttonScan 4.8s ease-in-out infinite}
+.ip-yunnan .hero-visual,.ip-yunnan .hero-glow,.ip-yunnan .burst{display:none!important}
+.world-coordinate{position:absolute;z-index:20;left:max(7vw,28px);bottom:38px;color:rgba(199,255,74,.62);font:11px 'DM Mono',monospace;letter-spacing:.12em}
+.ip-yunnan .quick-start{position:relative;z-index:12;margin-top:-1px!important;padding-top:72px!important;color:#effff7}.ip-yunnan .quick-head span{color:var(--fungus-lime)}.ip-yunnan .quick-head h2{color:#f4fff9}.ip-yunnan .quick-head p{color:#8fa49c}
+.ip-yunnan .industry-chips button{border-color:rgba(144,255,212,.14);background:#0e1b18;color:#eafff5;box-shadow:none}.ip-yunnan .industry-chips button small{color:#83958e}.ip-yunnan .industry-chips button.active{border-color:var(--fungus-lime);background:linear-gradient(145deg,rgba(199,255,74,.18),rgba(95,255,225,.08));box-shadow:0 0 30px rgba(199,255,74,.08)}
+@keyframes worldBreath{to{transform:scale(1.035) translate3d(-.5%,.5%,0)}}
+@keyframes cloudDrift{to{transform:translate3d(12%, -2%,0) scale(1.08)}}
+@keyframes dataRise{0%{transform:translate3d(0,120%,0) rotate(24deg);opacity:0}30%{opacity:.45}100%{transform:translate3d(90px,-180%,0) rotate(24deg);opacity:0}}
+@keyframes sporeFloat{0%,100%{transform:translate3d(0,15px,0) scale(.7);opacity:.25}50%{transform:translate3d(18px,-34px,0) scale(1.15);opacity:.8}}
+@keyframes beingFloat{0%,100%{transform:translate3d(0,3px,0) rotate(-.4deg)}50%{transform:translate3d(0,-7px,0) rotate(.7deg)}}
+@keyframes beingBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.012)}}
+@keyframes auraPulse{50%{opacity:.62;transform:scale(1.06)}}
+@keyframes dialogueBob{50%{transform:translateY(-5px)}}
+@keyframes buttonScan{0%,68%{transform:translateX(-500%) rotate(22deg)}86%,100%{transform:translateX(900%) rotate(22deg)}}
+@media(max-width:760px){
+  .ip-yunnan .hero{min-height:780px!important;padding:112px 22px 260px!important;align-items:flex-start}.ip-yunnan .hero:before{background:linear-gradient(180deg,rgba(3,11,10,.86),rgba(3,11,10,.48) 56%,rgba(3,11,10,.12) 75%,#07100f 100%)}
+  .yunnan-world-bg{background-position:62% center}.fungus-being{right:-13%;bottom:-2%;width:82vw;height:48%}.fungus-dialogue{top:auto;right:18px;bottom:245px;max-width:178px;font-size:12px}.world-coordinate{bottom:22px}
+  .hero-copy-stack{width:100%}.ip-yunnan .hero h1{font-size:clamp(47px,14vw,64px)!important;line-height:1.02!important}.ip-yunnan .hero-copy{font-size:15px!important;line-height:1.65!important}.ip-yunnan .hero-output{display:none}.ip-yunnan .hero .button.primary{min-height:58px;font-size:15px}.ip-yunnan .quick-start{padding-top:48px!important}
+}
+@media(prefers-reduced-motion:reduce){.yunnan-world-bg,.yunnan-clouds,.fungus-being,.fungus-being img,.fungus-being:before,.fungus-dialogue,.spore,.data-thread,.ip-yunnan .hero .button.primary:after{animation:none!important}}
