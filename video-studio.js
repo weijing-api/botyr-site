@@ -15,8 +15,9 @@
         <h2>把刚才的方案，做成竖屏视频</h2>
         <p>上传门店或产品照片，AI 会识别商品并可生成宣传图；字幕、轻微推拉和转场仍由浏览器在本地合成。</p>
       </div>
-      <span class="studio-beta">BETA</span>
+      <div class="studio-heading-tools"><span class="studio-beta">BETA</span><button id="studio-history-toggle" type="button">我的作品 <b id="studio-history-count">0</b></button></div>
     </div>
+    <div class="studio-history" id="studio-history" hidden><div class="studio-history-head"><div><b>我的作品</b><span>游客最近保存 3 条，仅保存在当前浏览器</span></div><button id="studio-history-close" type="button">收起</button></div><div class="studio-history-list" id="studio-history-list"><p>还没有生成作品</p></div></div>
     <div class="studio-grid">
       <div class="studio-controls">
         <div class="studio-block">
@@ -91,6 +92,11 @@
   result.insertBefore(entry, actions);
 
   const imageInput = section.querySelector('#studio-images');
+  const historyToggle = section.querySelector('#studio-history-toggle');
+  const historyCount = section.querySelector('#studio-history-count');
+  const historyPanel = section.querySelector('#studio-history');
+  const historyClose = section.querySelector('#studio-history-close');
+  const historyList = section.querySelector('#studio-history-list');
   const audioInput = section.querySelector('#studio-audio');
   const thumbs = section.querySelector('#studio-thumbs');
   const analyzeButton = section.querySelector('#studio-analyze');
@@ -129,6 +135,90 @@
   let imageAnalysis = null;
   let promoImageBlob = null;
   let promoImageUrl = '';
+
+  const mediaStore = (() => {
+    const databaseName = 'botyr-media-library';
+    const storeName = 'works';
+    const open = () => new Promise((resolve, reject) => {
+      const request = indexedDB.open(databaseName, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(storeName)) request.result.createObjectStore(storeName, { keyPath: 'id' });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const run = async (mode, operation) => {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(storeName, mode);
+        const store = transaction.objectStore(storeName);
+        const request = operation(store);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => db.close();
+        transaction.onerror = () => { db.close(); reject(transaction.error); };
+        transaction.onabort = () => { db.close(); reject(transaction.error || new Error('浏览器存储操作已取消')); };
+      });
+    };
+    return {
+      all: () => run('readonly', store => store.getAll()),
+      put: item => run('readwrite', store => store.put(item)),
+      remove: id => run('readwrite', store => store.delete(id)),
+    };
+  })();
+
+  const renderHistory = async () => {
+    try {
+      historyList.querySelectorAll('[data-object-url]').forEach(node => URL.revokeObjectURL(node.dataset.objectUrl));
+      const works = (await mediaStore.all()).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
+      historyCount.textContent = String(works.length);
+      historyList.innerHTML = '';
+      if (!works.length) {
+        historyList.innerHTML = '<p>还没有生成作品</p>';
+        return;
+      }
+      works.forEach(work => {
+        const card = document.createElement('article');
+        const mediaUrl = URL.createObjectURL(work.blob);
+        const media = document.createElement(work.type === 'video' ? 'video' : 'img');
+        media.src = mediaUrl;
+        media.dataset.objectUrl = mediaUrl;
+        if (work.type === 'video') { media.controls = true; media.playsInline = true; }
+        else media.alt = work.title || 'AI宣传图';
+        const info = document.createElement('div');
+        const title = document.createElement('b');
+        title.textContent = work.title || (work.type === 'video' ? '爆款短视频' : 'AI宣传图');
+        const time = document.createElement('span');
+        time.textContent = new Date(work.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const actions = document.createElement('div');
+        const downloadWork = document.createElement('a');
+        downloadWork.href = mediaUrl;
+        const safeTitle = title.textContent.replace(/[\\/:*?\"<>|]/g, '-').slice(0, 48) || '爆单作品';
+        downloadWork.download = `${safeTitle}.${work.type === 'video' ? 'webm' : 'png'}`;
+        downloadWork.textContent = '下载';
+        const deleteWork = document.createElement('button');
+        deleteWork.type = 'button';
+        deleteWork.textContent = '删除';
+        deleteWork.addEventListener('click', async () => { await mediaStore.remove(work.id); await renderHistory(); });
+        actions.append(downloadWork, deleteWork);
+        info.append(title, time, actions);
+        card.append(media, info);
+        historyList.append(card);
+      });
+    } catch (error) {
+      historyList.innerHTML = '<p>当前浏览器无法保存作品，请直接下载到本地</p>';
+    }
+  };
+  const saveWork = async (type, blob, title) => {
+    try {
+      await mediaStore.put({ id: `${Date.now()}-${crypto.randomUUID?.() || Math.random()}`, type, blob, title, createdAt: Date.now() });
+      const works = (await mediaStore.all()).sort((a, b) => b.createdAt - a.createdAt);
+      await Promise.all(works.slice(3).map(work => mediaStore.remove(work.id)));
+      await renderHistory();
+    } catch (error) {
+      console.warn('作品保存失败', error);
+    }
+  };
 
   const activeIdea = () => document.querySelector('.direction-panel.active .idea-item') || document.querySelector('.idea-item');
   const resultCopy = () => {
@@ -397,6 +487,7 @@
       promoDownload.href = promoImageUrl;
       promoResult.hidden = false;
       promoStatus.textContent = '宣传图已生成。请核对商品包装、Logo和文字后再发布。';
+      await saveWork('image', promoImageBlob, `${detectedProduct.value || imageAnalysis?.product_name || '商品'}宣传图`);
       globalThis.BotyrAnalytics?.track('promo_image_generation_success', { style: section.querySelector('[name="promo-style"]:checked')?.value || 'refine', ratio: promoRatio.value });
     } catch (error) {
       promoStatus.textContent = error.message || '宣传图生成失败，请稍后重试';
@@ -417,7 +508,10 @@
       });
     }
     globalThis.BotyrAnalytics?.track('video_studio_open');
+    renderHistory();
   });
+  historyToggle.addEventListener('click', async () => { historyPanel.hidden = !historyPanel.hidden; if (!historyPanel.hidden) await renderHistory(); });
+  historyClose.addEventListener('click', () => { historyPanel.hidden = true; });
   closeButton.addEventListener('click', () => {
     section.hidden = true;
     document.body.classList.remove('has-video-studio');
@@ -645,6 +739,7 @@
       download.href = outputUrl;
       download.classList.add('ready');
       download.textContent = `下载视频（${(blob.size / 1024 / 1024).toFixed(1)} MB）`;
+      await saveWork('video', blob, copy.title || '爆款短视频');
       progress.style.width = '100%';
       progressText.textContent = '已生成，可先播放预览再下载';
       globalThis.BotyrAnalytics?.track('local_video_render_success', { image_count: imageFiles.length, has_audio: Boolean(narrationBlob), auto_music: useMusic, duration_seconds: duration });
@@ -665,4 +760,5 @@
   });
 
   drawFrame(ctx, null, { title: '生成方案后，在这里制作视频' }, '上传照片即可开始', 0, 'clean');
+  renderHistory();
 })();
