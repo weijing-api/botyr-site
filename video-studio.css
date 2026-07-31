@@ -109,6 +109,24 @@
 .studio-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .studio-thumb button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(18,18,22,.72); color: #fff; cursor: pointer; }
 .studio-empty { color: #9a9ca7; font-size: 13px; }
+.studio-analysis { margin-top: 16px; padding: 16px; border: 1px solid #e7e7ed; border-radius: 18px; background: #fff; }
+.studio-analysis[data-state="loading"] { border-color: #ffc2dc; box-shadow: 0 0 0 4px rgba(255,111,174,.08); }
+.studio-analysis[data-state="success"] { border-color: #bde8cf; }
+.studio-analysis[data-state="error"] { border-color: #f0c8b8; }
+.studio-analysis-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.studio-analysis-head>div { display: flex; align-items: center; gap: 8px; }
+.studio-analysis-head span { padding: 5px 8px; border-radius: 99px; background: #fff0f7; color: #d84283; font-size: 11px; font-weight: 800; }
+.studio-analysis-head b { color: #292a31; font-size: 14px; }
+.studio-analysis-head button { border: 0; border-radius: 10px; padding: 8px 11px; background: #2d244f; color: #fff; font-size: 12px; font-weight: 750; cursor: pointer; }
+.studio-analysis-head button:disabled { opacity: .55; cursor: wait; }
+.studio-analysis>p { margin: 10px 0 0; color: #777986; font-size: 12px; line-height: 1.6; }
+.studio-analysis-result { display: grid; gap: 12px; margin-top: 14px; }
+.studio-analysis-result label { display: grid; gap: 7px; color: #555762; font-size: 12px; font-weight: 750; }
+.studio-analysis-result input,.studio-analysis-result textarea { width: 100%; border: 1px solid #e1e2e8; border-radius: 12px; padding: 11px 12px; background: #fafafd; color: #292a31; font: inherit; resize: vertical; }
+.studio-analysis-result input:focus,.studio-analysis-result textarea:focus { outline: 0; border-color: #ff6fae; box-shadow: 0 0 0 4px rgba(255,111,174,.1); }
+.studio-analysis-warning { padding: 12px; border-radius: 12px; background: #fff8e8; color: #725b25; font-size: 12px; }
+.studio-analysis-warning b { display: block; margin-bottom: 6px; }
+.studio-analysis-warning ul { margin: 0; padding-left: 18px; line-height: 1.65; }
 .studio-format { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .studio-format label { display: flex; align-items: center; gap: 9px; padding: 12px; border: 1px solid #e7e7ed; border-radius: 14px; background: #fff; color: #555762; font-size: 14px; }
 .studio-format input { accent-color: #ff6fae; }

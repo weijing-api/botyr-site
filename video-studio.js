@@ -24,6 +24,15 @@
           <p>建议按拍摄顺序选择 3–6 张竖图，第一张会作为开场画面。</p>
           <label class="studio-file">选择产品或门店照片 <span>最多 6 张</span><input id="studio-images" type="file" accept="image/*" multiple /></label>
           <div class="studio-thumbs" id="studio-thumbs"><span class="studio-empty">还没有选择照片</span></div>
+          <div class="studio-analysis" id="studio-analysis" data-state="idle">
+            <div class="studio-analysis-head"><div><span>AI 看图</span><b>识别商品内容</b></div><button id="studio-analyze" type="button">开始识别</button></div>
+            <p id="studio-analysis-status">上传商品图片后，AI 会自动分析画面并生成对应讲解。</p>
+            <div class="studio-analysis-result" id="studio-analysis-result" hidden>
+              <label>识别到的商品<input id="studio-detected-product" type="text" /></label>
+              <label>图片中明确可见的信息<textarea id="studio-visible-facts" rows="3"></textarea></label>
+              <div class="studio-analysis-warning"><b>还需要你确认</b><ul id="studio-uncertain-list"></ul></div>
+            </div>
+          </div>
         </div>
         <div class="studio-block">
           <h3>2. 自动讲解与声音</h3>
@@ -71,6 +80,13 @@
   const imageInput = section.querySelector('#studio-images');
   const audioInput = section.querySelector('#studio-audio');
   const thumbs = section.querySelector('#studio-thumbs');
+  const analyzeButton = section.querySelector('#studio-analyze');
+  const analysisBox = section.querySelector('#studio-analysis');
+  const analysisStatus = section.querySelector('#studio-analysis-status');
+  const analysisResult = section.querySelector('#studio-analysis-result');
+  const detectedProduct = section.querySelector('#studio-detected-product');
+  const visibleFacts = section.querySelector('#studio-visible-facts');
+  const uncertainList = section.querySelector('#studio-uncertain-list');
   const audioName = section.querySelector('#studio-audio-name');
   const voiceSelect = section.querySelector('#studio-voice');
   const voiceButton = section.querySelector('#studio-generate-voice');
@@ -90,12 +106,13 @@
   let outputUrl = '';
   let generatedVoiceBlob = null;
   let generatedVoiceUrl = '';
+  let imageAnalysis = null;
 
   const activeIdea = () => document.querySelector('.direction-panel.active .idea-item') || document.querySelector('.idea-item');
   const resultCopy = () => {
     const idea = activeIdea();
-    const title = idea?.querySelector('h3')?.textContent?.trim() || document.querySelector('#result-title')?.textContent?.trim() || '本周爆款选题';
-    const script = idea?.querySelector('.script-copy')?.textContent?.trim() || idea?.textContent?.trim() || '欢迎了解我们的产品和服务';
+    const title = detectedProduct?.value?.trim() || imageAnalysis?.product_name || idea?.querySelector('h3')?.textContent?.trim() || document.querySelector('#result-title')?.textContent?.trim() || '本周爆款选题';
+    const script = imageAnalysis?.suggested_script || idea?.querySelector('.script-copy')?.textContent?.trim() || idea?.textContent?.trim() || '欢迎了解我们的产品和服务';
     return { title, script: script.replace(/\s+/g, ' ') };
   };
   const splitCopy = text => {
@@ -260,6 +277,57 @@
       thumbs.append(item);
     });
   };
+  const clearGeneratedVoice = () => {
+    generatedVoiceBlob = null;
+    if (generatedVoiceUrl) URL.revokeObjectURL(generatedVoiceUrl);
+    generatedVoiceUrl = '';
+    voicePreview.hidden = true;
+    voicePreview.removeAttribute('src');
+    voiceStatus.textContent = '商品信息变化，将在生成视频时重新制作 AI 讲解';
+    audioName.textContent = audioInput.files[0]?.name || '暂未添加音频';
+  };
+  const analyzePrimaryImage = async () => {
+    const image = imageFiles[0];
+    if (!image) {
+      analysisStatus.textContent = '请先上传一张清晰的商品图片';
+      return;
+    }
+    analyzeButton.disabled = true;
+    analyzeButton.textContent = 'AI 正在看图…';
+    analysisBox.dataset.state = 'loading';
+    analysisStatus.textContent = '正在识别商品、包装和画面中明确可见的卖点…';
+    analysisResult.hidden = true;
+    const form = new FormData();
+    form.append('image', image, image.name);
+    try {
+      const response = await fetch('https://botyr-ai-api.3246809585.workers.dev/analyze-image', { method: 'POST', body: form });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || '图片识别失败');
+      imageAnalysis = payload;
+      detectedProduct.value = payload.product_name || '';
+      visibleFacts.value = (payload.visible_facts || []).join('；');
+      uncertainList.innerHTML = '';
+      (payload.uncertain?.length ? payload.uncertain : ['价格、优惠和具体卖点请由商家确认']).forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        uncertainList.appendChild(li);
+      });
+      analysisResult.hidden = false;
+      analysisBox.dataset.state = 'success';
+      analysisStatus.textContent = '识别完成。请确认信息，AI 不会编造图片中看不出的价格和功效。';
+      clearGeneratedVoice();
+      await refreshPreview();
+      globalThis.BotyrAnalytics?.track('product_image_analysis_success', { category: payload.category || 'unknown' });
+    } catch (error) {
+      imageAnalysis = null;
+      analysisBox.dataset.state = 'error';
+      analysisStatus.textContent = error.message || '图片识别失败，请换一张清晰图片重试';
+      globalThis.BotyrAnalytics?.track('product_image_analysis_failed');
+    } finally {
+      analyzeButton.disabled = false;
+      analyzeButton.textContent = '重新识别';
+    }
+  };
 
   entry.addEventListener('click', () => {
     section.hidden = false;
@@ -287,12 +355,23 @@
       await refreshPreview();
       progress.style.width = '0';
       progressText.textContent = imageFiles.length ? `已添加 ${imageFiles.length} 张照片，可以生成` : '等待添加素材';
+      if (imageFiles.length) await analyzePrimaryImage();
     } catch (error) {
       previewBitmaps = [];
       progress.style.width = '0';
       progressText.textContent = `照片读取失败：${error.message || '请换用 JPG、PNG 或 WebP 图片'}`;
     }
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'image', count: imageFiles.length });
+  });
+  analyzeButton.addEventListener('click', analyzePrimaryImage);
+  detectedProduct.addEventListener('input', () => { clearGeneratedVoice(); resetOutput(); refreshPreview(); });
+  visibleFacts.addEventListener('input', () => {
+    if (imageAnalysis) {
+      imageAnalysis.visible_facts = visibleFacts.value.split(/[；;\n]/).map(item => item.trim()).filter(Boolean);
+      const facts = imageAnalysis.visible_facts.join('，');
+      imageAnalysis.suggested_script = `大家好，今天给大家看看${detectedProduct.value || '这款商品'}。从图片可以看到${facts || '商品的实际外观'}。价格、规格和活动请以商家确认的信息为准，想了解详情可以私信咨询。`;
+    }
+    clearGeneratedVoice(); resetOutput(); refreshPreview();
   });
   audioInput.addEventListener('change', () => {
     generatedVoiceBlob = null;

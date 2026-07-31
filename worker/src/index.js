@@ -121,11 +121,73 @@ export default {
     }
 
     const url = new URL(request.url);
-    if (!["/generate", "/tts"].includes(url.pathname) || request.method !== "POST") {
+    if (!["/generate", "/tts", "/analyze-image"].includes(url.pathname) || request.method !== "POST") {
       return json({ error: "Not found" }, 404, origin);
     }
     if (!ALLOWED_ORIGINS.has(origin)) {
       return json({ error: "Origin not allowed" }, 403, origin);
+    }
+
+    if (url.pathname === "/analyze-image") {
+      if (!env.AI || !env.DEEPSEEK_API_KEY) {
+        return json({ error: "图片识别服务尚未配置完成" }, 503, origin);
+      }
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return json({ error: "图片上传格式错误" }, 400, origin);
+      }
+      const image = form.get("image");
+      if (!(image instanceof File) || !image.type.startsWith("image/")) {
+        return json({ error: "请选择 JPG、PNG 或 WebP 商品图片" }, 400, origin);
+      }
+      if (image.size > 6 * 1024 * 1024) {
+        return json({ error: "图片不能超过 6MB" }, 413, origin);
+      }
+      try {
+        const converted = await env.AI.toMarkdown(
+          { name: image.name || "product.jpg", blob: image },
+          { conversionOptions: { output: { format: "text" } } },
+        );
+        const conversion = Array.isArray(converted) ? converted[0] : converted;
+        const description = clean(conversion?.data, 4000);
+        if (!description) throw new Error("没有识别到图片内容");
+        const analysisResponse = await fetch("https://api.deepseek.com/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "deepseek-v4-flash",
+            thinking: { type: "disabled" },
+            messages: [
+              {
+                role: "system",
+                content: `你是谨慎的商品图片分析员。只能依据视觉描述提取图片中明确可见的信息，不能猜测价格、原料、功效、销量、口味、产地或优惠。输出 JSON：{"product_name":"简短商品名称","category":"行业类别","visible_facts":["明确可见事实"],"uncertain":["需要商家确认的信息"],"suggested_script":"60到100字的自然宣传口播，无法确认的信息使用[请补充]占位符"}。只输出 JSON。`,
+              },
+              { role: "user", content: `视觉模型对商品图片的描述如下：\n${description}` },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+            max_tokens: 700,
+          }),
+        });
+        if (!analysisResponse.ok) throw new Error("商品信息整理失败");
+        const analysisPayload = await analysisResponse.json();
+        const parsed = JSON.parse(analysisPayload?.choices?.[0]?.message?.content || "{}");
+        return json({
+          product_name: clean(parsed.product_name, 80) || "待确认商品",
+          category: clean(parsed.category, 50) || "本地商业",
+          visible_facts: Array.isArray(parsed.visible_facts) ? parsed.visible_facts.map((item) => clean(item, 100)).filter(Boolean).slice(0, 6) : [],
+          uncertain: Array.isArray(parsed.uncertain) ? parsed.uncertain.map((item) => clean(item, 100)).filter(Boolean).slice(0, 6) : [],
+          suggested_script: clean(parsed.suggested_script, 500),
+        }, 200, origin);
+      } catch (error) {
+        console.error("Image analysis failed", error);
+        return json({ error: "暂时无法识别图片，请换一张清晰的商品图重试" }, 502, origin);
+      }
     }
 
     let body;
