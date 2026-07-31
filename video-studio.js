@@ -13,7 +13,7 @@
       <div>
         <p class="studio-kicker">照片成片工作台</p>
         <h2>把刚才的方案，做成竖屏视频</h2>
-        <p>上传门店或产品照片，可选配音/音乐。字幕、轻微推拉和转场由浏览器在本地合成，素材不会上传服务器。</p>
+        <p>上传门店或产品照片，AI 会识别商品并可生成宣传图；字幕、轻微推拉和转场仍由浏览器在本地合成。</p>
       </div>
       <span class="studio-beta">BETA</span>
     </div>
@@ -32,6 +32,19 @@
               <label>图片中明确可见的信息<textarea id="studio-visible-facts" rows="3"></textarea></label>
               <div class="studio-analysis-warning"><b>还需要你确认</b><ul id="studio-uncertain-list"></ul></div>
             </div>
+          </div>
+          <div class="studio-promo" id="studio-promo">
+            <div class="studio-promo-head"><div><span>AI 作图</span><b>生成高质量宣传图</b></div><small>BETA</small></div>
+            <p>使用第一张商品图生成宣传画面。AI 可能改变包装小字，发布前请核对。</p>
+            <div class="studio-promo-styles" role="radiogroup" aria-label="宣传图风格">
+              <label><input type="radio" name="promo-style" value="refine" checked /><span>商品精修</span></label>
+              <label><input type="radio" name="promo-style" value="promo" /><span>促销海报</span></label>
+              <label><input type="radio" name="promo-style" value="douyin" /><span>抖音封面</span></label>
+              <label><input type="radio" name="promo-style" value="xhs" /><span>小红书封面</span></label>
+            </div>
+            <div class="studio-promo-actions"><select id="studio-promo-ratio" aria-label="宣传图比例"><option value="portrait">竖版 3:4</option><option value="square">方形 1:1</option></select><button id="studio-generate-promo" type="button">生成宣传图</button></div>
+            <p class="studio-promo-status" id="studio-promo-status">上传并识别商品后即可生成</p>
+            <div class="studio-promo-result" id="studio-promo-result" hidden><img id="studio-promo-image" alt="AI生成的商品宣传图" /><div><a id="studio-promo-download" download="AI商品宣传图.png">下载图片</a><button id="studio-promo-use" type="button">加入视频素材</button></div></div>
           </div>
         </div>
         <div class="studio-block">
@@ -87,6 +100,13 @@
   const detectedProduct = section.querySelector('#studio-detected-product');
   const visibleFacts = section.querySelector('#studio-visible-facts');
   const uncertainList = section.querySelector('#studio-uncertain-list');
+  const promoButton = section.querySelector('#studio-generate-promo');
+  const promoRatio = section.querySelector('#studio-promo-ratio');
+  const promoStatus = section.querySelector('#studio-promo-status');
+  const promoResult = section.querySelector('#studio-promo-result');
+  const promoImage = section.querySelector('#studio-promo-image');
+  const promoDownload = section.querySelector('#studio-promo-download');
+  const promoUse = section.querySelector('#studio-promo-use');
   const audioName = section.querySelector('#studio-audio-name');
   const voiceSelect = section.querySelector('#studio-voice');
   const voiceButton = section.querySelector('#studio-generate-voice');
@@ -107,6 +127,8 @@
   let generatedVoiceBlob = null;
   let generatedVoiceUrl = '';
   let imageAnalysis = null;
+  let promoImageBlob = null;
+  let promoImageUrl = '';
 
   const activeIdea = () => document.querySelector('.direction-panel.active .idea-item') || document.querySelector('.idea-item');
   const resultCopy = () => {
@@ -244,6 +266,21 @@
     15000,
     '照片读取超时，请减少照片数量或换用 JPG、PNG 格式',
   );
+  const prepareImageForAI = async file => {
+    const bitmap = await createImageBitmap(file);
+    const maxEdge = 1024;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const output = document.createElement('canvas');
+    output.width = Math.max(1, Math.round(bitmap.width * scale));
+    output.height = Math.max(1, Math.round(bitmap.height * scale));
+    output.getContext('2d').drawImage(bitmap, 0, 0, output.width, output.height);
+    bitmap.close?.();
+    return withTimeout(new Promise((resolve, reject) => output.toBlob(
+      blob => blob ? resolve(blob) : reject(new Error('图片压缩失败')),
+      'image/webp',
+      .88,
+    )), 10000, '图片处理超时');
+  };
   const refreshPreview = async () => {
     previewBitmaps.forEach(bitmap => bitmap.close?.());
     previewBitmaps = await loadBitmaps(imageFiles);
@@ -297,9 +334,10 @@
     analysisBox.dataset.state = 'loading';
     analysisStatus.textContent = '正在识别商品、包装和画面中明确可见的卖点…';
     analysisResult.hidden = true;
-    const form = new FormData();
-    form.append('image', image, image.name);
     try {
+      const form = new FormData();
+      const optimizedImage = await prepareImageForAI(image);
+      form.append('image', optimizedImage, 'product.webp');
       const response = await fetch('https://botyr-ai-api.3246809585.workers.dev/analyze-image', { method: 'POST', body: form });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || '图片识别失败');
@@ -326,6 +364,46 @@
     } finally {
       analyzeButton.disabled = false;
       analyzeButton.textContent = '重新识别';
+    }
+  };
+  const generatePromoImage = async () => {
+    const image = imageFiles[0];
+    if (!image) {
+      promoStatus.textContent = '请先上传一张清晰的商品图片';
+      imageInput.click();
+      return;
+    }
+    promoButton.disabled = true;
+    promoButton.textContent = 'AI 正在设计…';
+    promoStatus.textContent = '正在保留商品主体并重新设计光影与背景，通常需要 30–90 秒，请不要关闭页面…';
+    try {
+      const form = new FormData();
+      const optimizedImage = await prepareImageForAI(image);
+      form.append('image', optimizedImage, 'product.webp');
+      form.append('product', detectedProduct.value || imageAnalysis?.product_name || '商品');
+      form.append('facts', visibleFacts.value || (imageAnalysis?.visible_facts || []).join('；'));
+      form.append('style', section.querySelector('[name="promo-style"]:checked')?.value || 'refine');
+      form.append('ratio', promoRatio.value);
+      const response = await fetch('https://botyr-ai-api.3246809585.workers.dev/generate-promo-image', { method: 'POST', body: form });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || '宣传图生成失败');
+      }
+      promoImageBlob = await response.blob();
+      if (!promoImageBlob.type.startsWith('image/')) throw new Error('生成结果不是有效图片');
+      if (promoImageUrl) URL.revokeObjectURL(promoImageUrl);
+      promoImageUrl = URL.createObjectURL(promoImageBlob);
+      promoImage.src = promoImageUrl;
+      promoDownload.href = promoImageUrl;
+      promoResult.hidden = false;
+      promoStatus.textContent = '宣传图已生成。请核对商品包装、Logo和文字后再发布。';
+      globalThis.BotyrAnalytics?.track('promo_image_generation_success', { style: section.querySelector('[name="promo-style"]:checked')?.value || 'refine', ratio: promoRatio.value });
+    } catch (error) {
+      promoStatus.textContent = error.message || '宣传图生成失败，请稍后重试';
+      globalThis.BotyrAnalytics?.track('promo_image_generation_failed');
+    } finally {
+      promoButton.disabled = false;
+      promoButton.textContent = promoImageBlob ? '再生成一版' : '生成宣传图';
     }
   };
 
@@ -364,6 +442,18 @@
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'image', count: imageFiles.length });
   });
   analyzeButton.addEventListener('click', analyzePrimaryImage);
+  promoButton.addEventListener('click', generatePromoImage);
+  promoUse.addEventListener('click', async () => {
+    if (!promoImageBlob) return;
+    const extension = promoImageBlob.type.includes('png') ? 'png' : 'webp';
+    imageFiles.push(new File([promoImageBlob], `AI宣传图.${extension}`, { type: promoImageBlob.type }));
+    imageFiles = imageFiles.slice(0, 6);
+    resetOutput();
+    renderThumbs();
+    await refreshPreview();
+    promoStatus.textContent = '已加入视频素材，将作为最后一个画面使用。';
+    globalThis.BotyrAnalytics?.track('promo_image_added_to_video');
+  });
   detectedProduct.addEventListener('input', () => { clearGeneratedVoice(); resetOutput(); refreshPreview(); });
   visibleFacts.addEventListener('input', () => {
     if (imageAnalysis) {
@@ -451,9 +541,16 @@
         renderButton.textContent = '正在生成 AI 讲解…';
         progress.style.width = '8%';
         progressText.textContent = '正在根据方案自动生成 AI 讲解…';
-        narrationBlob = await generateNarration({ resetVideo: false });
+        try {
+          narrationBlob = await generateNarration({ resetVideo: false });
+        } catch (voiceError) {
+          narrationBlob = null;
+          voiceStatus.textContent = `${voiceError.message || 'AI 讲解暂不可用'}；本次将生成字幕与轻音乐版`;
+          progressText.textContent = 'AI 讲解暂不可用，继续生成字幕与轻音乐版…';
+          globalThis.BotyrAnalytics?.track('video_narration_fallback', { reason: voiceError.message || 'unknown' });
+        }
       }
-      globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: true, auto_music: useMusic });
+      globalThis.BotyrAnalytics?.track('local_video_render_start', { image_count: imageFiles.length, has_audio: Boolean(narrationBlob), auto_music: useMusic });
       renderButton.textContent = '正在本地合成…';
       progressText.textContent = '讲解已生成，正在准备照片…';
       if (previewBitmaps.length !== imageFiles.length) previewBitmaps = await loadBitmaps(imageFiles);

@@ -27,6 +27,16 @@ function clean(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
+function toBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
 const encoder = new TextEncoder();
 
 function toHex(buffer) {
@@ -121,7 +131,7 @@ export default {
     }
 
     const url = new URL(request.url);
-    if (!["/generate", "/tts", "/analyze-image"].includes(url.pathname) || request.method !== "POST") {
+    if (!["/generate", "/tts", "/analyze-image", "/generate-promo-image"].includes(url.pathname) || request.method !== "POST") {
       return json({ error: "Not found" }, 404, origin);
     }
     if (!ALLOWED_ORIGINS.has(origin)) {
@@ -187,6 +197,50 @@ export default {
       } catch (error) {
         console.error("Image analysis failed", error);
         return json({ error: "暂时无法识别图片，请换一张清晰的商品图重试" }, 502, origin);
+      }
+    }
+
+    if (url.pathname === "/generate-promo-image") {
+      if (!env.AI) return json({ error: "宣传图生成服务尚未配置完成" }, 503, origin);
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return json({ error: "图片上传格式错误" }, 400, origin);
+      }
+      const image = form.get("image");
+      if (!(image instanceof File) || !image.type.startsWith("image/")) {
+        return json({ error: "请选择 JPG、PNG 或 WebP 商品图片" }, 400, origin);
+      }
+      if (image.size > 6 * 1024 * 1024) return json({ error: "图片不能超过 6MB" }, 413, origin);
+      const product = clean(form.get("product"), 100) || "商品";
+      const facts = clean(form.get("facts"), 400);
+      const style = clean(form.get("style"), 30) || "refine";
+      const ratio = clean(form.get("ratio"), 10) === "square" ? "square" : "portrait";
+      const stylePrompts = {
+        refine: "premium commercial product photography, clean studio lighting, realistic shadows, elegant minimal background, high-end advertising retouch",
+        promo: "energetic Chinese local-business promotion poster, premium red and warm gold lighting, clear central product, spacious layout for offer text",
+        douyin: "cinematic vertical short-video cover, dramatic light, bold visual focus, high contrast, modern social media advertising",
+        xhs: "bright tasteful lifestyle editorial, soft natural light, clean composition, premium Xiaohongshu commercial cover aesthetic",
+      };
+      try {
+        const generated = await env.AI.run("@cf/runwayml/stable-diffusion-v1-5-img2img", {
+          prompt: `Create a professional advertising image for ${product}. ${facts ? `Confirmed visible facts: ${facts}.` : ""} ${stylePrompts[style] || stylePrompts.refine}. Preserve the original product shape, package colors and logo placement. No added claims. No text.`,
+          negative_prompt: "distorted package, changed logo, misspelled text, extra products, duplicate objects, deformed object, watermark, low resolution, blurry, cartoon",
+          image_b64: toBase64(await image.arrayBuffer()),
+          width: ratio === "square" ? 768 : 768,
+          height: ratio === "square" ? 768 : 1024,
+          num_steps: 20,
+          strength: 0.32,
+          guidance: 7.5,
+        });
+        const headers = new Headers(cors(origin));
+        headers.set("Content-Type", "image/png");
+        headers.set("Cache-Control", "no-store");
+        return new Response(generated, { status: 200, headers });
+      } catch (error) {
+        console.error("Promo image generation failed", error);
+        return json({ error: "宣传图生成失败，请稍后重试或换一张商品图" }, 502, origin);
       }
     }
 
