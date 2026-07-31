@@ -637,6 +637,7 @@
       await audioContext?.close();
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+      if (blob.size < 1024) throw new Error('浏览器没有写入有效视频数据，请保持当前页面可见后重试');
       outputUrl = URL.createObjectURL(blob);
       video.src = outputUrl;
       video.hidden = false;
