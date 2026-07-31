@@ -596,18 +596,22 @@
       recorder.start(500);
       if (audioContext) {
         progressText.textContent = '正在启动自动声音…';
-        await withTimeout(
-          audioContext.resume(),
-          4000,
-          '浏览器阻止了自动声音，请点击页面后重试',
-        );
+        try {
+          await withTimeout(audioContext.resume(), 4000, '浏览器阻止了自动声音');
+        } catch (soundError) {
+          voiceStatus.textContent = `${soundError.message}；本次继续生成静音字幕版`;
+          progressText.textContent = '自动声音被浏览器阻止，继续生成静音字幕版…';
+          globalThis.BotyrAnalytics?.track('video_audio_context_fallback');
+        }
       }
       if (audioElement) {
-        await withTimeout(
-          audioElement.play(),
-          5000,
-          '浏览器阻止了讲解播放，请点击页面后重试',
-        );
+        try {
+          await withTimeout(audioElement.play(), 5000, '浏览器阻止了讲解播放');
+        } catch (playError) {
+          voiceStatus.textContent = `${playError.message}；本次继续生成静音字幕版`;
+          progressText.textContent = '讲解播放被浏览器阻止，继续生成静音字幕版…';
+          globalThis.BotyrAnalytics?.track('video_narration_playback_fallback');
+        }
       }
       const startedAt = performance.now();
       await withTimeout(new Promise(resolve => {
