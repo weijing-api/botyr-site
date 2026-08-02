@@ -118,7 +118,44 @@ async function synthesizeSpeech(text, voiceType, env) {
   return {
     audio: data.Response.Audio,
     requestId: data.Response.RequestId || null,
+    codec: "mp3",
   };
+}
+
+async function synthesizeWorkersSpeech(text, env) {
+  if (!env.AI) throw new Error("语音服务暂不可用");
+  let generated;
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      generated = await env.AI.run("@cf/myshell-ai/melotts", {
+        prompt: text,
+        lang: "zh",
+      });
+      break;
+    } catch (error) {
+      lastError = error;
+      console.warn(`Workers AI TTS attempt ${attempt + 1} failed`, error);
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+    }
+  }
+  if (!generated) throw lastError || new Error("语音服务暂不可用");
+  const audioPayload = generated?.audio;
+  if (typeof audioPayload === "string") {
+    return { audio: audioPayload, requestId: null, provider: "cloudflare", codec: "wav" };
+  }
+  let buffer;
+  if (audioPayload instanceof ArrayBuffer) buffer = audioPayload;
+  else if (ArrayBuffer.isView(audioPayload)) {
+    buffer = audioPayload.buffer.slice(audioPayload.byteOffset, audioPayload.byteOffset + audioPayload.byteLength);
+  } else if (audioPayload instanceof ReadableStream) buffer = await new Response(audioPayload).arrayBuffer();
+  else if (audioPayload instanceof Response) buffer = await audioPayload.arrayBuffer();
+  else if (generated instanceof ArrayBuffer) buffer = generated;
+  else if (ArrayBuffer.isView(generated)) buffer = generated.buffer.slice(generated.byteOffset, generated.byteOffset + generated.byteLength);
+  else if (generated instanceof ReadableStream) buffer = await new Response(generated).arrayBuffer();
+  else if (generated instanceof Response) buffer = await generated.arrayBuffer();
+  if (!buffer || !buffer.byteLength) throw new Error("语音服务返回了空音频");
+  return { audio: toBase64(buffer), requestId: null, provider: "cloudflare", codec: "wav" };
 }
 
 export default {
@@ -252,16 +289,21 @@ export default {
     }
 
     if (url.pathname === "/tts") {
-      if (!env.TENCENT_SECRET_ID || !env.TENCENT_SECRET_KEY) {
-        return json({ error: "自动讲解服务尚未配置，请先添加腾讯云密钥" }, 503, origin);
-      }
       const text = clean(body.text, 150);
       const allowedVoices = new Set([101001, 101004, 101030]);
       const voiceType = allowedVoices.has(Number(body.voiceType)) ? Number(body.voiceType) : 101001;
       if (text.length < 2) return json({ error: "口播内容太短" }, 400, origin);
       try {
-        const speech = await synthesizeSpeech(text, voiceType, env);
-        return json({ audio: speech.audio, codec: "mp3", request_id: speech.requestId }, 200, origin);
+        let speech;
+        if (env.TENCENT_SECRET_ID && env.TENCENT_SECRET_KEY) {
+          try {
+            speech = { ...(await synthesizeSpeech(text, voiceType, env)), provider: "tencent" };
+          } catch (error) {
+            console.warn("Tencent TTS unavailable, falling back to Workers AI", error);
+          }
+        }
+        if (!speech) speech = await synthesizeWorkersSpeech(text, env);
+        return json({ audio: speech.audio, codec: speech.codec, request_id: speech.requestId, provider: speech.provider }, 200, origin);
       } catch (error) {
         console.error("TTS request failed", error);
         return json({ error: "自动讲解暂时不可用，请稍后重试" }, 502, origin);

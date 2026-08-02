@@ -576,15 +576,18 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voiceType: Number(voiceSelect.value) }),
-    }), 30000, 'AI 讲解生成超时，请重新尝试');
+    }), 60000, 'AI 讲解生成超时，请重新尝试');
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.audio) throw new Error(payload.error || 'AI 讲解生成失败');
-    generatedVoiceBlob = base64ToBlob(payload.audio, 'audio/mpeg');
+    const narrationMimeType = payload.codec === 'wav' ? 'audio/wav' : 'audio/mpeg';
+    generatedVoiceBlob = base64ToBlob(payload.audio, narrationMimeType);
     if (generatedVoiceUrl) URL.revokeObjectURL(generatedVoiceUrl);
     generatedVoiceUrl = URL.createObjectURL(generatedVoiceBlob);
     voicePreview.src = generatedVoiceUrl;
     voicePreview.hidden = false;
-    voiceStatus.textContent = 'AI 讲解已生成，将自动加入视频';
+    voiceStatus.textContent = payload.provider === 'cloudflare'
+      ? 'AI 普通话讲解已生成，将自动加入视频'
+      : 'AI 讲解已生成，将自动加入视频';
     audioInput.value = '';
     audioName.textContent = '当前使用 AI 自动讲解';
     if (resetVideo) resetOutput();
