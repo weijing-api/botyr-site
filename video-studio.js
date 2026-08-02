@@ -31,6 +31,11 @@
             <div class="studio-analysis-result" id="studio-analysis-result" hidden>
               <label>识别到的商品<input id="studio-detected-product" type="text" /></label>
               <label>图片中明确可见的信息<textarea id="studio-visible-facts" rows="3"></textarea></label>
+              <div class="studio-narration-editor">
+                <div><label for="studio-narration-script">AI 拟定的商品解说</label><button id="studio-rewrite-narration" type="button">按真实卖点重写</button></div>
+                <textarea id="studio-narration-script" rows="5" maxlength="180" placeholder="识别完成后生成商品解说，你也可以直接修改"></textarea>
+                <small>结构：3秒钩子 → 商品实拍证据 → 顾客价值 → 一个行动引导</small>
+              </div>
               <div class="studio-analysis-warning"><b>还需要你确认</b><ul id="studio-uncertain-list"></ul></div>
             </div>
           </div>
@@ -105,6 +110,8 @@
   const analysisResult = section.querySelector('#studio-analysis-result');
   const detectedProduct = section.querySelector('#studio-detected-product');
   const visibleFacts = section.querySelector('#studio-visible-facts');
+  const narrationScript = section.querySelector('#studio-narration-script');
+  const rewriteNarrationButton = section.querySelector('#studio-rewrite-narration');
   const uncertainList = section.querySelector('#studio-uncertain-list');
   const promoButton = section.querySelector('#studio-generate-promo');
   const promoRatio = section.querySelector('#studio-promo-ratio');
@@ -133,6 +140,7 @@
   let generatedVoiceBlob = null;
   let generatedVoiceUrl = '';
   let imageAnalysis = null;
+  let narrationNeedsRefresh = false;
   let promoImageBlob = null;
   let promoImageUrl = '';
 
@@ -224,7 +232,7 @@
   const resultCopy = () => {
     const idea = activeIdea();
     const title = detectedProduct?.value?.trim() || imageAnalysis?.product_name || idea?.querySelector('h3')?.textContent?.trim() || document.querySelector('#result-title')?.textContent?.trim() || '本周爆款选题';
-    const script = imageAnalysis?.suggested_script || idea?.querySelector('.script-copy')?.textContent?.trim() || idea?.textContent?.trim() || '欢迎了解我们的产品和服务';
+    const script = narrationScript?.value?.trim() || imageAnalysis?.suggested_script || idea?.querySelector('.script-copy')?.textContent?.trim() || idea?.textContent?.trim() || '欢迎了解我们的产品和服务';
     return { title, script: script.replace(/\s+/g, ' ') };
   };
   const splitCopy = text => {
@@ -413,6 +421,34 @@
     voiceStatus.textContent = '商品信息变化，将在生成视频时重新制作 AI 讲解';
     audioName.textContent = audioInput.files[0]?.name || '暂未添加音频';
   };
+  const rewriteNarration = async ({ quiet = false } = {}) => {
+    const product = detectedProduct.value.trim();
+    const facts = visibleFacts.value.trim();
+    if (!product || !facts) throw new Error('请先确认商品名称和图片中的真实卖点');
+    rewriteNarrationButton.disabled = true;
+    rewriteNarrationButton.textContent = '正在重写…';
+    if (!quiet) analysisStatus.textContent = '正在把真实卖点整理成“钩子、证据、价值、行动”商品解说…';
+    try {
+      const response = await withTimeout(fetch('https://botyr-ai-api.3246809585.workers.dev/generate-narration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product, facts, category: imageAnalysis?.category || '本地商业' }),
+      }), 45000, '商品解说生成超时，请重新尝试');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.script) throw new Error(payload.error || '商品解说生成失败');
+      imageAnalysis = { ...(imageAnalysis || {}), product_name: product, visible_facts: facts.split(/[；;\n]/).map(item => item.trim()).filter(Boolean), suggested_script: payload.script, hook: payload.hook || '', angle: payload.angle || '' };
+      narrationScript.value = payload.script;
+      narrationNeedsRefresh = false;
+      clearGeneratedVoice();
+      await refreshPreview();
+      analysisStatus.textContent = `解说已按真实卖点重写${payload.angle ? ` · 角度：${payload.angle}` : ''}。请试听后再生成视频。`;
+      globalThis.BotyrAnalytics?.track('product_narration_rewritten', { category: imageAnalysis.category || 'unknown', text_length: payload.script.length });
+      return payload.script;
+    } finally {
+      rewriteNarrationButton.disabled = false;
+      rewriteNarrationButton.textContent = '按真实卖点重写';
+    }
+  };
   const analyzePrimaryImage = async () => {
     const image = imageFiles[0];
     if (!image) {
@@ -434,6 +470,8 @@
       imageAnalysis = payload;
       detectedProduct.value = payload.product_name || '';
       visibleFacts.value = (payload.visible_facts || []).join('；');
+      narrationScript.value = payload.suggested_script || '';
+      narrationNeedsRefresh = true;
       uncertainList.innerHTML = '';
       (payload.uncertain?.length ? payload.uncertain : ['价格、优惠和具体卖点请由商家确认']).forEach(item => {
         const li = document.createElement('li');
@@ -442,9 +480,14 @@
       });
       analysisResult.hidden = false;
       analysisBox.dataset.state = 'success';
-      analysisStatus.textContent = '识别完成。请确认信息，AI 不会编造图片中看不出的价格和功效。';
-      clearGeneratedVoice();
-      await refreshPreview();
+      analysisStatus.textContent = '图片识别完成，正在对商品解说做事实审校…';
+      try {
+        await rewriteNarration({ quiet: true });
+      } catch (rewriteError) {
+        clearGeneratedVoice();
+        await refreshPreview();
+        analysisStatus.textContent = `${rewriteError.message || '商品解说审校暂时失败'}。请核对初稿后点击“按真实卖点重写”。`;
+      }
       globalThis.BotyrAnalytics?.track('product_image_analysis_success', { category: payload.category || 'unknown' });
     } catch (error) {
       imageAnalysis = null;
@@ -519,6 +562,13 @@
   });
   imageInput.addEventListener('change', async () => {
     imageFiles = [...imageInput.files].filter(file => file.type.startsWith('image/')).slice(0, 6);
+    imageAnalysis = null;
+    narrationNeedsRefresh = false;
+    detectedProduct.value = '';
+    visibleFacts.value = '';
+    narrationScript.value = '';
+    analysisResult.hidden = true;
+    clearGeneratedVoice();
     resetOutput();
     renderThumbs();
     progress.style.width = imageFiles.length ? '3%' : '0';
@@ -536,6 +586,13 @@
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'image', count: imageFiles.length });
   });
   analyzeButton.addEventListener('click', analyzePrimaryImage);
+  rewriteNarrationButton.addEventListener('click', async () => {
+    try {
+      await rewriteNarration();
+    } catch (error) {
+      analysisStatus.textContent = error.message || '商品解说生成失败，请稍后重试';
+    }
+  });
   promoButton.addEventListener('click', generatePromoImage);
   promoUse.addEventListener('click', async () => {
     if (!promoImageBlob) return;
@@ -548,13 +605,22 @@
     promoStatus.textContent = '已加入视频素材，将作为最后一个画面使用。';
     globalThis.BotyrAnalytics?.track('promo_image_added_to_video');
   });
-  detectedProduct.addEventListener('input', () => { clearGeneratedVoice(); resetOutput(); refreshPreview(); });
+  detectedProduct.addEventListener('input', () => {
+    narrationNeedsRefresh = true;
+    analysisStatus.textContent = '商品名称已修改，生成语音前会按新信息重写解说。';
+    clearGeneratedVoice(); resetOutput(); refreshPreview();
+  });
   visibleFacts.addEventListener('input', () => {
     if (imageAnalysis) {
       imageAnalysis.visible_facts = visibleFacts.value.split(/[；;\n]/).map(item => item.trim()).filter(Boolean);
-      const facts = imageAnalysis.visible_facts.join('，');
-      imageAnalysis.suggested_script = `大家好，今天给大家看看${detectedProduct.value || '这款商品'}。从图片可以看到${facts || '商品的实际外观'}。价格、规格和活动请以商家确认的信息为准，想了解详情可以私信咨询。`;
     }
+    narrationNeedsRefresh = true;
+    analysisStatus.textContent = '真实卖点已修改，生成语音前会自动重写解说。';
+    clearGeneratedVoice(); resetOutput(); refreshPreview();
+  });
+  narrationScript.addEventListener('input', () => {
+    if (imageAnalysis) imageAnalysis.suggested_script = narrationScript.value.trim();
+    narrationNeedsRefresh = false;
     clearGeneratedVoice(); resetOutput(); refreshPreview();
   });
   audioInput.addEventListener('change', () => {
@@ -569,14 +635,15 @@
     globalThis.BotyrAnalytics?.track('video_media_added', { media_type: 'audio', count: audioInput.files.length });
   });
   const generateNarration = async ({ resetVideo = true } = {}) => {
+    if (imageAnalysis && narrationNeedsRefresh) await rewriteNarration({ quiet: true });
     const text = resultCopy().script.slice(0, 150);
     if (!text) throw new Error('当前方案没有可用口播');
-    voiceStatus.textContent = 'AI 正在生成普通话讲解…';
+    voiceStatus.textContent = 'AI 正在生成约 10 秒商品讲解，通常需要 30–70 秒…';
     const response = await withTimeout(fetch('https://botyr-ai-api.3246809585.workers.dev/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voiceType: Number(voiceSelect.value) }),
-    }), 60000, 'AI 讲解生成超时，请重新尝试');
+    }), 85000, 'AI 讲解生成超时，请重新尝试');
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.audio) throw new Error(payload.error || 'AI 讲解生成失败');
     const narrationMimeType = payload.codec === 'wav' ? 'audio/wav' : 'audio/mpeg';

@@ -27,6 +27,92 @@ function clean(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
+function normalizeIdea(idea) {
+  const shots = Array.isArray(idea?.shots) ? idea.shots.map((shot) => {
+    if (typeof shot === "string") return clean(shot, 140);
+    return clean(shot?.shot || shot?.content || shot?.description || shot?.text, 140);
+  }).filter(Boolean).slice(0, 3) : [];
+  return {
+    title: clean(idea?.title, 100),
+    hook: clean(idea?.hook, 120),
+    script: clean(idea?.script, 500),
+    shots,
+    cta: clean(idea?.cta, 120),
+  };
+}
+
+const CLAIM_TERMS = [
+  "不是冷冻", "绝不", "保证", "最好", "第一", "性价比之王", "不烫手", "不闷", "不软",
+  "热气腾腾", "拿到手还是烫", "酥脆", "多汁", "顺滑", "不腻", "显白", "耐用", "省空间",
+  "新鲜", "刚出锅", "每天现做", "限量", "售罄", "排队", "火爆", "回头客", "最爱", "招牌",
+  "秘制", "零添加", "0添加", "无添加", "健康", "正宗", "地道", "裹粉", "油花", "油温", "热油",
+  "几分钟", "分钟出锅", "趁热", "冷藏柜", "冷藏", "冰柜", "肉质", "金黄", "冒热气", "递给顾客",
+  "顾客接过", "顾客反应", "刚做", "现做", "当天", "现烤", "现煮", "现磨", "手工", "手作", "纯天然",
+  "无糖", "低脂", "减肥", "修复", "改善", "提亮", "显瘦", "防水", "防晒", "耐磨", "防滑", "环保",
+  "进口", "原装", "专业", "免费", "赠送", "优惠", "半价", "特价",
+];
+
+function unsupportedClaims(text, factBoundary) {
+  const content = clean(text, 1200).replace(/\s+/g, "");
+  const allowed = clean(factBoundary, 1200).replace(/\s+/g, "");
+  return CLAIM_TERMS.filter((term) => content.includes(term) && !allowed.includes(term));
+}
+
+function groundedNarration(product, facts, city = "", category = "") {
+  const safeProduct = clean(product, 22) || "这款商品";
+  const factList = clean(facts, 700)
+    .split(/[；;\n]/)
+    .map((item) => clean(item, 54))
+    .filter(Boolean)
+    .slice(0, 3);
+  const budget = Math.max(10, 44 - safeProduct.length - 13);
+  const selectedFacts = [];
+  for (const fact of factList) {
+    const candidate = [...selectedFacts, fact].join("；");
+    if (candidate.length > budget) break;
+    selectedFacts.push(fact);
+  }
+  const summary = (selectedFacts.join("；") || factList[0] || "实物细节").slice(0, budget);
+  return clean(`${safeProduct}：${summary}。想看细节，评论告诉我。`, 46);
+}
+
+function enforceNarrationGrounding(narration, product, facts, category = "", city = "", strict = false) {
+  const boundary = `${product}；${facts}；${category}；${city}`;
+  const script = clean(narration?.script, 500);
+  const violations = unsupportedClaims(script, boundary);
+  if (strict || script.length < 30 || violations.length) {
+    const safeScript = groundedNarration(product, facts, city, category);
+    return {
+      hook: clean(safeScript.split(/[。！？]/)[0], 80),
+      angle: "商品真实细节",
+      script: safeScript,
+      fact_guard: violations.length ? `已移除未经确认的表述：${violations.join("、")}` : "严格真实信息模式",
+    };
+  }
+  return {
+    hook: clean(narration?.hook, 80),
+    angle: clean(narration?.angle, 80),
+    script,
+    fact_guard: "事实审校通过",
+  };
+}
+
+function groundedShots(product, facts, city = "") {
+  const safeProduct = clean(product, 48) || "商品";
+  const keyFacts = clean(facts, 300).split(/[；;\n]/).map((item) => clean(item, 48)).filter(Boolean).slice(0, 2);
+  return [
+    `镜头1：${safeProduct}整体近景，第一秒直接露出主体`,
+    `镜头2：依次拍清真实细节：${keyFacts.join("；") || "商品外观与使用细节"}`,
+    `镜头3：${clean(city, 20) ? `${clean(city, 20)}门店或` : ""}商品收尾，字幕引导观众评论想了解的细节`,
+  ];
+}
+
+function ideaReviewText(idea) {
+  return [idea?.title, idea?.hook, idea?.script, ...(Array.isArray(idea?.shots) ? idea.shots : []), idea?.cta]
+    .map((item) => typeof item === "string" ? item : JSON.stringify(item || ""))
+    .join("；");
+}
+
 function toBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -35,6 +121,61 @@ function toBase64(buffer) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
   return btoa(binary);
+}
+
+function fromBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function splitSpeechText(text, maxChars = 46) {
+  const sentences = clean(text, 150).split(/(?<=[。！？；])/).map((item) => item.trim()).filter(Boolean);
+  const chunks = [];
+  for (const sentence of sentences) {
+    if (sentence.length > maxChars) {
+      for (let offset = 0; offset < sentence.length; offset += maxChars) chunks.push(sentence.slice(offset, offset + maxChars));
+      continue;
+    }
+    const previous = chunks[chunks.length - 1];
+    if (previous && previous.length + sentence.length <= maxChars) chunks[chunks.length - 1] += sentence;
+    else chunks.push(sentence);
+  }
+  return chunks.length ? chunks : [clean(text, maxChars)];
+}
+
+function wavDataOffset(bytes) {
+  if (bytes.length < 44 || String.fromCharCode(...bytes.slice(0, 4)) !== "RIFF") throw new Error("语音格式异常");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const id = String.fromCharCode(...bytes.slice(offset, offset + 4));
+    const size = view.getUint32(offset + 4, true);
+    if (id === "data") return offset + 8;
+    offset += 8 + size + (size % 2);
+  }
+  throw new Error("语音数据不完整");
+}
+
+function mergeWavAudio(parts) {
+  if (parts.length === 1) return parts[0];
+  const wavParts = parts.map((part) => fromBase64(part.audio));
+  const offsets = wavParts.map(wavDataOffset);
+  const headerLength = offsets[0];
+  const payloadLength = wavParts.reduce((total, bytes, index) => total + bytes.length - offsets[index], 0);
+  const merged = new Uint8Array(headerLength + payloadLength);
+  merged.set(wavParts[0].slice(0, headerLength), 0);
+  let cursor = headerLength;
+  wavParts.forEach((bytes, index) => {
+    const payload = bytes.slice(offsets[index]);
+    merged.set(payload, cursor);
+    cursor += payload.length;
+  });
+  const view = new DataView(merged.buffer);
+  view.setUint32(4, merged.length - 8, true);
+  view.setUint32(headerLength - 4, payloadLength, true);
+  return { audio: toBase64(merged.buffer), requestId: null, provider: "cloudflare", codec: "wav" };
 }
 
 const encoder = new TextEncoder();
@@ -168,7 +309,7 @@ export default {
     }
 
     const url = new URL(request.url);
-    if (!["/generate", "/tts", "/analyze-image", "/generate-promo-image"].includes(url.pathname) || request.method !== "POST") {
+    if (!["/generate", "/tts", "/analyze-image", "/generate-promo-image", "/generate-narration"].includes(url.pathname) || request.method !== "POST") {
       return json({ error: "Not found" }, 404, origin);
     }
     if (!ALLOWED_ORIGINS.has(origin)) {
@@ -212,7 +353,15 @@ export default {
             messages: [
               {
                 role: "system",
-                content: `你是谨慎的商品图片分析员。只能依据视觉描述提取图片中明确可见的信息，不能猜测价格、原料、功效、销量、口味、产地或优惠。输出 JSON：{"product_name":"简短商品名称","category":"行业类别","visible_facts":["明确可见事实"],"uncertain":["需要商家确认的信息"],"suggested_script":"60到100字的自然宣传口播，无法确认的信息使用[请补充]占位符"}。只输出 JSON。`,
+                content: `你是谨慎的商品图片分析员，也是本地商家短视频编导。只能依据视觉描述提取图片中明确可见的信息，不能猜测价格、原料、功效、销量、口味、产地、优惠或顾客评价。
+宣传口播必须像真实短视频，而不是客服介绍：
+1. 90到140个中文字符，约18到28秒；
+2. 前20个字内点出具体商品，并用一个与画面有关的疑问、细节或消费场景形成3秒钩子；
+3. 中段按“画面证据→顾客能感知的价值”表达，只能使用图片中明确可见的事实；
+4. 结尾只给一个自然行动指令，例如评论想看哪个细节、私信问具体信息或到店前咨询；
+5. 禁止使用“大家好、欢迎光临、今天给大家看看、品质保证、性价比之王、闭眼入”等空泛套话；
+6. 信息不足就省略，不要在口播中出现[请补充]等占位符；短句、口语化、有停顿，商品名称自然出现1到2次。
+输出 JSON：{"product_name":"简短具体的商品名称","category":"行业类别","visible_facts":["明确可见事实"],"uncertain":["需要商家确认的信息"],"hook":"前3秒开场","angle":"本条视频的宣传角度","suggested_script":"完整自然宣传口播"}。只输出 JSON。`,
               },
               { role: "user", content: `视觉模型对商品图片的描述如下：\n${description}` },
             ],
@@ -224,12 +373,23 @@ export default {
         if (!analysisResponse.ok) throw new Error("商品信息整理失败");
         const analysisPayload = await analysisResponse.json();
         const parsed = JSON.parse(analysisPayload?.choices?.[0]?.message?.content || "{}");
+        const productName = clean(parsed.product_name, 80) || "待确认商品";
+        const category = clean(parsed.category, 50) || "本地商业";
+        const visibleFacts = Array.isArray(parsed.visible_facts) ? parsed.visible_facts.map((item) => clean(item, 100)).filter(Boolean).slice(0, 6) : [];
+        const guarded = enforceNarrationGrounding({
+          hook: parsed.hook,
+          angle: parsed.angle,
+          script: parsed.suggested_script,
+        }, productName, visibleFacts.join("；"), category, "", true);
         return json({
-          product_name: clean(parsed.product_name, 80) || "待确认商品",
-          category: clean(parsed.category, 50) || "本地商业",
-          visible_facts: Array.isArray(parsed.visible_facts) ? parsed.visible_facts.map((item) => clean(item, 100)).filter(Boolean).slice(0, 6) : [],
+          product_name: productName,
+          category,
+          visible_facts: visibleFacts,
           uncertain: Array.isArray(parsed.uncertain) ? parsed.uncertain.map((item) => clean(item, 100)).filter(Boolean).slice(0, 6) : [],
-          suggested_script: clean(parsed.suggested_script, 500),
+          hook: guarded.hook,
+          angle: guarded.angle,
+          suggested_script: guarded.script,
+          fact_guard: guarded.fact_guard,
         }, 200, origin);
       } catch (error) {
         console.error("Image analysis failed", error);
@@ -302,7 +462,11 @@ export default {
             console.warn("Tencent TTS unavailable, falling back to Workers AI", error);
           }
         }
-        if (!speech) speech = await synthesizeWorkersSpeech(text, env);
+        if (!speech) {
+          const segments = splitSpeechText(text);
+          const parts = await Promise.all(segments.map((segment) => synthesizeWorkersSpeech(segment, env)));
+          speech = mergeWavAudio(parts);
+        }
         return json({ audio: speech.audio, codec: speech.codec, request_id: speech.requestId, provider: speech.provider }, 200, origin);
       } catch (error) {
         console.error("TTS request failed", error);
@@ -312,6 +476,99 @@ export default {
 
     if (!env.DEEPSEEK_API_KEY) {
       return json({ error: "服务尚未配置完成" }, 503, origin);
+    }
+
+    if (url.pathname === "/generate-narration") {
+      const product = clean(body.product, 100);
+      const category = clean(body.category, 60) || "本地商业";
+      const facts = clean(body.facts, 700);
+      if (!product || !facts) return json({ error: "请先确认商品名称和图片中的真实卖点" }, 400, origin);
+      try {
+        const narrationResponse = await fetch("https://api.deepseek.com/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "deepseek-v4-flash",
+            thinking: { type: "disabled" },
+            messages: [
+              {
+                role: "system",
+                content: `你是中国本地商家的短视频商品编导。请把商家确认的真实信息写成一段可直接配音的商品宣传口播。
+结构固定为：前3秒钩子→商品画面证据→顾客能感知的价值或适用场景→一个行动引导。
+要求：
+- 90到140个中文字符，约18到28秒；前20字内必须自然点出商品；
+- 像老板、店员或真实使用者在说话，短句、有停顿，不写成广告说明书；
+- 禁止“大家好、欢迎光临、今天给大家看看、品质保证、性价比之王、闭眼入”等空话；
+- 只能使用商家提供的真实事实，不得补写价格、优惠、原料、口味、功效、销量、稀缺、评价、店龄或体验；
+- 没有提供的信息直接不说，不要出现占位符；
+- 结尾只选一个动作：评论、私信咨询或到店前咨询，不得同时堆多个动作。
+输出 JSON：{"hook":"前3秒开场","angle":"宣传角度","script":"完整口播"}。只输出 JSON。`,
+              },
+              { role: "user", content: `行业：${category}\n商品：${product}\n商家确认的真实事实：${facts}` },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.55,
+            max_tokens: 500,
+          }),
+        });
+        if (!narrationResponse.ok) throw new Error("解说策划服务暂时不可用");
+        const narrationPayload = await narrationResponse.json();
+        const parsed = JSON.parse(narrationPayload?.choices?.[0]?.message?.content || "{}");
+        const draftScript = clean(parsed.script, 500);
+        if (draftScript.length < 30) throw new Error("解说内容过短");
+
+        let reviewed = { script: draftScript, hook: clean(parsed.hook, 80), angle: clean(parsed.angle, 80) };
+        try {
+          const reviewResponse = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "deepseek-v4-flash",
+              thinking: { type: "disabled" },
+              messages: [
+                {
+                  role: "system",
+                  content: `你是广告事实审校员。商品名与商家确认事实构成唯一事实边界。逐句审查口播并重写：
+- 删除所有事实中没有明确出现的味道、口感、气味、材质、原料、功效、效果、使用结果、价格、优惠、销量、稀缺性、生产过程、顾客评价和体验；
+- “酥脆、多汁、顺滑、不腻、显白、耐用、省空间、刚出锅、每天现做”等都属于需要证据的主张，事实中没有原词就不得保留；
+- 可以描述镜头能看到的颜色、形状、包装、数量、标识和空间关系；可以提出问题、说明接下来拍什么、邀请观众咨询，但不能把未知信息写成肯定句；
+- 保留短视频结构：3秒钩子→真实画面证据→观看价值→一个行动引导；
+- 80到140个中文字符，短句、有停顿，不用“大家好、今天给大家看看”，不出现占位符。
+输出 JSON：{"hook":"审校后的开场","angle":"安全且具体的宣传角度","script":"审校后的完整口播"}。只输出 JSON。`,
+                },
+                { role: "user", content: `商品：${product}\n允许使用的事实：${facts}\n待审校口播：${draftScript}` },
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.1,
+              max_tokens: 500,
+            }),
+          });
+          if (reviewResponse.ok) {
+            const reviewPayload = await reviewResponse.json();
+            const checked = JSON.parse(reviewPayload?.choices?.[0]?.message?.content || "{}");
+            const checkedScript = clean(checked.script, 500);
+            if (checkedScript.length >= 30) {
+              reviewed = {
+                script: checkedScript,
+                hook: clean(checked.hook, 80) || reviewed.hook,
+                angle: clean(checked.angle, 80) || reviewed.angle,
+              };
+            }
+          }
+        } catch (error) {
+          console.warn("Narration fact review failed, using constrained draft", error);
+        }
+        return json(enforceNarrationGrounding(reviewed, product, facts, category, "", true), 200, origin);
+      } catch (error) {
+        console.error("Narration generation failed", error);
+        return json({ error: "商品解说暂时没有生成成功，请稍后重试" }, 502, origin);
+      }
     }
 
     const industry = clean(body.industry, 50);
@@ -338,7 +595,11 @@ export default {
 12. 标题要适用于用户自己的商家账号，不要写成探店测评或比较竞争对手；
 13. 每一条 title、hook、script 和 shots 都必须紧扣用户填写的产品，不得改变行业或产品；每条 script 至少原样使用一项“真实卖点”；
 14. 地区直接使用用户填写的值，不得输出 [城市]；只有店名、详细地址等用户未提供的信息可以使用占位符；
-15. 只输出 JSON，格式为 {"ideas":[...]}，不要输出 Markdown。`;
+15. hook 必须承担前3秒留人作用，用具体商品、价格、细节、问题或消费场景开场；script 的第一句必须自然承接 hook，不能另起一个无关的“大家好”；
+16. script 按“钩子→真实卖点证据→顾客能感知的价值→一个行动引导”组织，90到140个中文字符，短句、口语化，适合18到28秒配音；
+17. 禁止“大家好、欢迎光临、今天给大家看看、品质保证、性价比之王、闭眼入”等客服式或空泛套话；结尾只引导收藏、评论、私信中的一个动作；
+18. shots 要与口播逐段对应：第一个镜头拍最强视觉钩子，第二个镜头证明真实卖点，第三个镜头承接行动引导；
+19. 只输出 JSON，格式为 {"ideas":[...]}，不要输出 Markdown。`;
 
     let upstream;
     try {
@@ -382,7 +643,64 @@ export default {
     try {
       const parsed = JSON.parse(content);
       if (!Array.isArray(parsed.ideas) || parsed.ideas.length === 0) throw new Error();
-      return json({ ideas: parsed.ideas.slice(0, 7) }, 200, origin);
+      let reviewedIdeas = parsed.ideas.slice(0, 7);
+      try {
+        const reviewResponse = await fetch("https://api.deepseek.com/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "deepseek-v4-flash",
+            thinking: { type: "disabled" },
+            messages: [
+              {
+                role: "system",
+                content: `你是本地商家短视频方案的事实审校员。用户资料是唯一事实边界。审校输入中的全部方案并返回相同 JSON 结构：
+1. 删除或改写资料中没有明确出现的价格、优惠、味道、口感、功效、原料、材质、温度、库存、生产步骤、销量、顾客反应、比较和绝对化结论；合理但未提供的推断也不能写成事实；
+2. 不得把“下单后现做”扩大成“绝不提前准备”，不得把“纸袋包装”扩大成“不闷不软”，不得凭空增加冰柜、裹粉、油温、顾客接过商品等镜头；
+3. 每条 script 保持“具体钩子→至少一项原样真实卖点→顾客观看价值→单一行动引导”，70到140个中文字符，不用客服式开场；
+4. shots 必须是三个字符串，只拍商品、资料中已提供的制作细节、门店环境或已授权员工；餐饮不得出现血腥宰杀画面，未说明有顾客授权时不得拍顾客；
+5. title、hook、script、shots、cta 全部紧扣原商品和地区，保留7个不同方向。
+只输出 {"ideas":[...]} JSON。`,
+              },
+              {
+                role: "user",
+                content: `行业：${industry}\n产品或服务：${offer}\n允许使用的真实卖点：${facts}\n地区：${city}\n待审校方案：${JSON.stringify({ ideas: reviewedIdeas })}`,
+              },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.1,
+            max_tokens: 2200,
+          }),
+        });
+        if (reviewResponse.ok) {
+          const reviewPayload = await reviewResponse.json();
+          const checked = JSON.parse(reviewPayload?.choices?.[0]?.message?.content || "{}");
+          if (Array.isArray(checked.ideas) && checked.ideas.length) reviewedIdeas = checked.ideas.slice(0, 7);
+        }
+      } catch (error) {
+        console.warn("Idea fact review failed, using constrained draft", error);
+      }
+      const ideas = reviewedIdeas.map(normalizeIdea).filter((idea) => idea.title && idea.script).map((idea) => {
+        const boundary = `${offer}；${facts}；${industry}；${city}`;
+        const ideaViolations = unsupportedClaims(ideaReviewText(idea), boundary);
+        const guarded = enforceNarrationGrounding(idea, offer, facts, industry, city, ideaViolations.length > 0);
+        if (guarded.fact_guard !== "事实审校通过") {
+          return {
+            ...idea,
+            hook: guarded.hook,
+            script: guarded.script,
+            shots: groundedShots(offer, facts, city),
+            cta: "还想确认哪个细节，评论告诉我。",
+            fact_guard: ideaViolations.length ? `已移除未经确认的表述：${ideaViolations.join("、")}` : guarded.fact_guard,
+          };
+        }
+        return { ...idea, fact_guard: guarded.fact_guard };
+      });
+      if (!ideas.length) throw new Error();
+      return json({ ideas }, 200, origin);
     } catch {
       return json({ error: "AI 返回格式异常，请重新生成" }, 502, origin);
     }

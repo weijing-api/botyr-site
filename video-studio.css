@@ -124,6 +124,13 @@
 .studio-analysis-result label { display: grid; gap: 7px; color: #555762; font-size: 12px; font-weight: 750; }
 .studio-analysis-result input,.studio-analysis-result textarea { width: 100%; border: 1px solid #e1e2e8; border-radius: 12px; padding: 11px 12px; background: #fafafd; color: #292a31; font: inherit; resize: vertical; }
 .studio-analysis-result input:focus,.studio-analysis-result textarea:focus { outline: 0; border-color: #ff6fae; box-shadow: 0 0 0 4px rgba(255,111,174,.1); }
+.studio-narration-editor { display: grid; gap: 8px; padding: 14px; border: 1px solid #eadff0; border-radius: 14px; background: linear-gradient(145deg,#fff,#fbf7ff); }
+.studio-narration-editor>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.studio-narration-editor>div label { display: block; color: #34343d; font-size: 12px; font-weight: 800; }
+.studio-narration-editor button { border: 1px solid #ffc6df; border-radius: 9px; padding: 7px 10px; background: #fff0f7; color: #a12e62; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.studio-narration-editor button:disabled { opacity: .6; cursor: wait; }
+.studio-narration-editor textarea { min-height: 118px; resize: vertical; line-height: 1.75; }
+.studio-narration-editor small { color: #8b7d91; font-size: 10px; line-height: 1.55; }
 .studio-analysis-warning { padding: 12px; border-radius: 12px; background: #fff8e8; color: #725b25; font-size: 12px; }
 .studio-analysis-warning b { display: block; margin-bottom: 6px; }
 .studio-analysis-warning ul { margin: 0; padding-left: 18px; line-height: 1.65; }
@@ -224,6 +231,7 @@
   .studio-preview { position: static; width: min(260px,100%); margin: 0 auto; grid-row: 1; }
   .studio-format { grid-template-columns: 1fr; }
   .studio-voice-row { grid-template-columns: 1fr; }
+  .studio-narration-editor>div { align-items: flex-start; }
   .video-studio-entry { width: 100%; margin-bottom: 20px; }
   .studio-heading-tools { align-self: flex-start; }
   .studio-history-list { display: flex; overflow-x: auto; }
