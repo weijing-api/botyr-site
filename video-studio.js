@@ -68,7 +68,7 @@
           <audio id="studio-voice-preview" controls hidden></audio>
           <label class="studio-file">添加音频 <span>MP3 / M4A / WAV</span><input id="studio-audio" type="file" accept="audio/*" /></label>
           <p class="studio-audio-name" id="studio-audio-name">暂未添加音频</p>
-          <label class="studio-music-toggle"><input id="studio-auto-music" type="checkbox" checked /><span><b>自动添加轻音乐</b><small>系统生成低音量氛围音乐，并自动避让讲解</small></span></label>
+          <label class="studio-music-toggle"><input id="studio-auto-music" type="checkbox" /><span><b>添加轻音乐（可选）</b><small>默认关闭，优先保证 AI 讲解清晰</small></span></label>
         </div>
         <div class="studio-block">
           <h3>3. 视频样式</h3>
@@ -314,12 +314,6 @@
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     return new Blob([bytes], { type });
   };
-  const waitForMedia = media => withTimeout(new Promise((resolve, reject) => {
-    if (Number.isFinite(media.duration) && media.duration > 0) return resolve();
-    media.addEventListener('loadedmetadata', resolve, { once: true });
-    media.addEventListener('error', () => reject(new Error('音频读取失败')), { once: true });
-    media.load();
-  }), 10000, '音频读取超时，请更换音频');
   const createMusicBed = (context, destination, duration, hasNarration) => {
     const master = context.createGain();
     master.gain.setValueAtTime(hasNarration ? 0.022 : 0.045, context.currentTime);
@@ -697,10 +691,11 @@
     const useMusic = Boolean(autoMusic?.checked);
     let recorder = null;
     let tracks = [];
-    let audioElement = null;
+    let narrationSource = null;
     let audioContext = null;
-    let audioUrl = '';
     try {
+      audioContext = new AudioContext();
+      await withTimeout(audioContext.resume(), 4000, '浏览器阻止了声音处理，请再次点击生成');
       if (!narrationBlob) {
         renderButton.textContent = '正在生成 AI 讲解…';
         progress.style.width = '8%';
@@ -733,17 +728,19 @@
       tracks = [...videoStream.getVideoTracks()];
       let destination = null;
       if (narrationBlob || useMusic) {
-        audioContext = new AudioContext();
         destination = audioContext.createMediaStreamDestination();
         tracks.push(...destination.stream.getAudioTracks());
       }
       if (narrationBlob) {
-        audioUrl = URL.createObjectURL(narrationBlob);
-        audioElement = new Audio(audioUrl);
-        await waitForMedia(audioElement);
-        duration = Math.max(baseDuration, Math.min(45, audioElement.duration + .5));
-        const source = audioContext.createMediaElementSource(audioElement);
-        source.connect(destination);
+        const audioData = await narrationBlob.arrayBuffer();
+        const audioBuffer = await withTimeout(audioContext.decodeAudioData(audioData.slice(0)), 15000, 'AI 讲解音频解码失败，请重新生成讲解');
+        if (!Number.isFinite(audioBuffer.duration) || audioBuffer.duration <= .2) throw new Error('AI 讲解音频无有效人声，请重新生成');
+        duration = Math.max(baseDuration, Math.min(45, audioBuffer.duration + .5));
+        narrationSource = audioContext.createBufferSource();
+        narrationSource.buffer = audioBuffer;
+        const narrationGain = audioContext.createGain();
+        narrationGain.gain.value = .96;
+        narrationSource.connect(narrationGain).connect(destination);
       }
       if (useMusic) createMusicBed(audioContext, destination, duration, Boolean(narrationBlob));
       const sceneSeconds = duration / bitmaps.length;
@@ -759,24 +756,15 @@
       });
       recorder.start(500);
       if (audioContext) {
-        progressText.textContent = '正在启动自动声音…';
+        progressText.textContent = '正在写入 AI 讲解音轨…';
         try {
           await withTimeout(audioContext.resume(), 4000, '浏览器阻止了自动声音');
         } catch (soundError) {
-          voiceStatus.textContent = `${soundError.message}；本次继续生成静音字幕版`;
-          progressText.textContent = '自动声音被浏览器阻止，继续生成静音字幕版…';
           globalThis.BotyrAnalytics?.track('video_audio_context_fallback');
+          throw new Error(`${soundError.message}，请再次点击生成视频`);
         }
       }
-      if (audioElement) {
-        try {
-          await withTimeout(audioElement.play(), 5000, '浏览器阻止了讲解播放');
-        } catch (playError) {
-          voiceStatus.textContent = `${playError.message}；本次继续生成静音字幕版`;
-          progressText.textContent = '讲解播放被浏览器阻止，继续生成静音字幕版…';
-          globalThis.BotyrAnalytics?.track('video_narration_playback_fallback');
-        }
-      }
+      narrationSource?.start(audioContext.currentTime + .08);
       const startedAt = performance.now();
       await withTimeout(new Promise(resolve => {
         const tick = () => {
@@ -795,11 +783,9 @@
         tick();
       }), duration * 1000 + 8000, '视频渲染超时，请保持页面显示并减少照片数量');
       recorder.stop();
-      audioElement?.pause();
       await finished;
       tracks.forEach(track => track.stop());
       await audioContext?.close();
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
       const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
       if (blob.size < 1024) throw new Error('浏览器没有写入有效视频数据，请保持当前页面可见后重试');
       outputUrl = URL.createObjectURL(blob);
@@ -819,11 +805,10 @@
       progressText.textContent = `合成失败：${error.message || '请重新尝试'}`;
       progress.style.width = '0';
     } finally {
-      audioElement?.pause();
+      try { narrationSource?.stop(); } catch {}
       if (recorder?.state === 'recording') recorder.stop();
       tracks.forEach(track => track.stop());
       if (audioContext && audioContext.state !== 'closed') audioContext.close().catch(() => {});
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
       renderButton.disabled = false;
       renderButton.textContent = outputUrl ? '重新生成视频' : '自动讲解并生成视频';
     }
